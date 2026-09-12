@@ -15,7 +15,13 @@ func _ready() -> void:
 	make_level_collision()
 	# The procedural runtime mesh mirrors the Blender source (art/netshooter_house.blend).
 	# The GLB is retained in godot/assets for editor-side art replacement.
-	if "--host" in OS.get_cmdline_user_args(): host_game()
+	if "--lobby" in OS.get_cmdline_user_args():
+		return
+	start_single_player()
+
+func start_single_player() -> void:
+	$Lobby.hide()
+	spawn_player(1)
 
 func host_game() -> void:
 	peer.create_server(PORT)

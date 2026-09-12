@@ -27,7 +27,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		yaw -= event.relative.x * .0025; pitch = clamp(pitch - event.relative.y * .0025, -1.2, 1.2)
 		rotation.y = yaw; $Camera.rotation.x = pitch
-	if event.is_action_pressed("fire"): fire.rpc(global_position, -$Camera.global_transform.basis.z)
+	if event.is_action_pressed("fire"):
+		if multiplayer.has_multiplayer_peer(): fire.rpc(global_position, -$Camera.global_transform.basis.z)
+		else: fire(global_position, -$Camera.global_transform.basis.z)
 
 func _physics_process(delta: float) -> void:
 	if !is_multiplayer_authority(): return
@@ -37,7 +39,7 @@ func _physics_process(delta: float) -> void:
 	if !is_on_floor(): velocity.y -= GRAVITY * delta
 	else: velocity.y = -0.1
 	move_and_slide()
-	sync_state.rpc(global_position, rotation.y, $Camera.rotation.x)
+	if multiplayer.has_multiplayer_peer(): sync_state.rpc(global_position, rotation.y, $Camera.rotation.x)
 
 @rpc("any_peer", "call_remote", "unreliable")
 func sync_state(new_position: Vector3, new_yaw: float, new_pitch: float) -> void:
