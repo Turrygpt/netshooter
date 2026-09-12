@@ -14,10 +14,47 @@ func _ready() -> void:
 	$Body.mesh.radius = .34
 	$Body.mesh.height = 1.35
 	$Body.material_override = material(Color("36a6ff") if is_multiplayer_authority() else Color("ef6060"))
-	var gun := MeshInstance3D.new(); gun.mesh = BoxMesh.new(); gun.mesh.size = Vector3(.6, .17, .22); gun.position = Vector3(.48, .8, -.12); gun.material_override = material(Color("161b20")); $Body.add_child(gun)
 	if is_multiplayer_authority():
+		create_view_weapon()
 		$Camera.current = true
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	else:
+		create_world_weapon()
+
+func add_weapon_part(parent: Node3D, size: Vector3, position: Vector3, color: Color) -> void:
+	var part := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = size
+	part.mesh = box
+	part.position = position
+	part.material_override = material(color)
+	parent.add_child(part)
+
+func create_view_weapon() -> void:
+	# First-person weapon: a child of the camera, so it cannot drift in world space.
+	var weapon := Node3D.new()
+	weapon.name = "ViewWeapon"
+	weapon.position = Vector3(.38, -.30, -.72)
+	weapon.rotation = Vector3(deg_to_rad(-4.0), deg_to_rad(-3.0), 0.0)
+	$Camera.add_child(weapon)
+	var dark := Color("161b20")
+	var metal := Color("4d5a66")
+	add_weapon_part(weapon, Vector3(.26, .18, .58), Vector3(0, 0, 0), dark) # receiver
+	add_weapon_part(weapon, Vector3(.10, .10, .52), Vector3(0, .02, -.53), metal) # barrel
+	add_weapon_part(weapon, Vector3(.04, .04, .10), Vector3(0, .10, -.27), Color("d9e4ec")) # front sight
+	add_weapon_part(weapon, Vector3(.17, .25, .12), Vector3(0, -.18, .12), Color("29323a")) # grip
+	add_weapon_part(weapon, Vector3(.20, .12, .30), Vector3(0, -.03, .38), dark) # stock
+	add_weapon_part(weapon, Vector3(.12, .07, .13), Vector3(0, .13, .12), metal) # rear sight
+
+func create_world_weapon() -> void:
+	# Other players still need a compact visible weapon in the shared world.
+	var weapon := Node3D.new()
+	weapon.name = "WorldWeapon"
+	weapon.position = Vector3(.38, .72, -.18)
+	weapon.rotation = Vector3(0.0, deg_to_rad(-8.0), 0.0)
+	$Body.add_child(weapon)
+	add_weapon_part(weapon, Vector3(.16, .12, .45), Vector3.ZERO, Color("161b20"))
+	add_weapon_part(weapon, Vector3(.06, .06, .30), Vector3(0, .01, -.34), Color("4d5a66"))
 
 func material(color: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new(); m.albedo_color = color; m.metallic = .2; return m
