@@ -8,6 +8,7 @@ var room_size := 8.0
 var floor_height := 3.4
 
 func _ready() -> void:
+	$Lobby/Panel/Box/Single.pressed.connect(start_single_player)
 	$Lobby/Panel/Box/Host.pressed.connect(host_game)
 	$Lobby/Panel/Box/Join.pressed.connect(join_game)
 	multiplayer.peer_connected.connect(_on_peer_connected)
@@ -15,9 +16,8 @@ func _ready() -> void:
 	make_level_collision()
 	# The procedural runtime mesh mirrors the Blender source (art/netshooter_house.blend).
 	# The GLB is retained in godot/assets for editor-side art replacement.
-	if "--lobby" in OS.get_cmdline_user_args():
-		return
-	start_single_player()
+	if "--single" in OS.get_cmdline_user_args(): start_single_player()
+	if "--host" in OS.get_cmdline_user_args(): host_game()
 
 func start_single_player() -> void:
 	$Lobby.hide()

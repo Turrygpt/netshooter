@@ -31,6 +31,9 @@ autowrap_mode = 2
 placeholder_text = "IP хоста"
 text = "127.0.0.1"
 
+[node name="Single" type="Button" parent="Lobby/Panel/Box"]
+text = "Одиночная игра"
+
 [node name="Host" type="Button" parent="Lobby/Panel/Box"]
 text = "Создать LAN-лобби"
 
