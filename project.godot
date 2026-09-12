@@ -18,7 +18,10 @@ config/features=PackedStringArray("4.7")
 
 window/size/viewport_width=1920
 window/size/viewport_height=1080
-window/mode="fullscreen"
+window/size/initial_width_override=1920
+window/size/initial_height_override=1080
+window/stretch/mode="canvas_items"
+window/mode=4
 
 [filesystem]
 
