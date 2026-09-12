@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "art" / "netshooter_house.blend"
-GLB = ROOT / "web" / "public" / "netshooter_house.glb"
+GLB = ROOT / "godot" / "assets" / "netshooter_house.glb"
 
 for obj in list(bpy.data.objects):
     bpy.data.objects.remove(obj, do_unlink=True)
@@ -36,7 +36,7 @@ def cylinder(name, loc, radius, depth, material, rotation=None):
     bpy.ops.mesh.primitive_cylinder_add(vertices=12, radius=radius, depth=depth, location=loc, rotation=rotation or (0,0,0))
     o=bpy.context.object; o.name=name; o.data.materials.append(material); return o
 
-ROOM=8.0; H=3.4; FLOORS=5
+ROOM=8.0; H=3.4; FLOORS=1
 def wall_with_door(name, axis, coord, z, span_min, span_max, door_center, material=CONCRETE):
     # Wall split into two pieces around a 2.5 m traversable opening.
     gap=2.5; low=door_center-gap/2; high=door_center+gap/2
@@ -60,23 +60,17 @@ for floor in range(FLOORS):
     # exterior envelope
     for x in (-12,12): box(f"F{floor+1}_outer_x", (x,0,z+H/2), (.35,24,H), CONCRETE,.04)
     for y in (-12,12): box(f"F{floor+1}_outer_y", (0,y,z+H/2), (24,.35,H), CONCRETE,.04)
-    # each interior divide has a centered 2.5 m opening. This connects center -> sides and sides -> corners.
-    for y in (-8,0,8):
-        wall_with_door(f"F{floor+1}_vertical_passage", 'x', y, z, -12, 12, 0)
-    for x in (-8,0,8):
-        wall_with_door(f"F{floor+1}_horizontal_passage", 'y', x, z, -12, 12, 0)
+    # Two structural dividers per axis, split per room bay. Each bay has a real 2.5 m aperture.
+    # This yields center→side and side→corner routes, without walls running through room centers.
+    for y in (-4,4):
+        for x in (-8,0,8):
+            wall_with_door(f"F{floor+1}_north_south_passage", 'x', y, z, x-4, x+4, x)
+    for x in (-4,4):
+        for y in (-8,0,8):
+            wall_with_door(f"F{floor+1}_east_west_passage", 'y', x, z, y-4, y+4, y)
     # yellow guides distinguish the central-room circulation routes.
     box(f"F{floor+1}_guide_x", (0,0,z+.02), (21,.12,.04), TRIM)
     box(f"F{floor+1}_guide_y", (0,0,z+.02), (.12,21,.04), TRIM)
-    # gentle incline lives in north side room; exit at the next floor.
-    if floor < FLOORS-1:
-        ramp=box(f"F{floor+1}_ramp_to_F{floor+2}", (0,8,z+H/2), (3.0,7.2,.25), TRIM,.04)
-        ramp.rotation_euler.x=math.radians(-25.3)
-        ramp.location.z=z+H/2
-        # safety rails
-        for x in (-1.55,1.55):
-            rail=box(f"F{floor+1}_ramp_rail", (x,8,z+H/2+.55), (.08,7.2,.08), GUN)
-            rail.rotation_euler.x=math.radians(-25.3)
 
 # simple player doll in central ground room
 base=Vector((0,0,.2))

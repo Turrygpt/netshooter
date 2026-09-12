@@ -2,7 +2,7 @@
 
 ```
 ┌────────┬────────┬────────┐
-│ NW     │ N ramp │ NE     │
+│ NW     │ N      │ NE     │
 ├────────┼────────┼────────┤
 │ W      │ CENTER │ E      │
 ├────────┼────────┼────────┤
@@ -10,4 +10,4 @@
 └────────┴────────┴────────┘
 ```
 
-Every cell is 8 m × 8 m. Central-to-side and side-to-corner door apertures are 2.5 m clear. The north-side ramp has a 3 m usable width and rises 3.4 m to the next copy of this plan.
+Every cell is 8 m × 8 m. This is the complete one-floor level. Central-to-side and side-to-corner door apertures are 2.5 m clear.

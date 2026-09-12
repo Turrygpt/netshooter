@@ -69,16 +69,17 @@ func make_box(position: Vector3, size: Vector3, rotate_x := 0.0) -> void:
 	collider.shape = shape; wall.add_child(collider); add_child(wall)
 
 func make_level_collision() -> void:
-	for floor in 5:
+	for floor in 1:
 		var y := floor * floor_height
 		make_box(Vector3(0, y - .15, 0), Vector3(24, .3, 24))
 		for x in [-12.0, 12.0]: make_box(Vector3(x, y + 1.7, 0), Vector3(.35, 3.4, 24))
 		for z in [-12.0, 12.0]: make_box(Vector3(0, y + 1.7, z), Vector3(24, 3.4, .35))
-		for z in [-8.0, 0.0, 8.0]:
-			make_box(Vector3(-6.625, y + 1.7, z), Vector3(10.75, 3.4, .28))
-			make_box(Vector3(6.625, y + 1.7, z), Vector3(10.75, 3.4, .28))
-		for x in [-8.0, 0.0, 8.0]:
-			make_box(Vector3(x, y + 1.7, -6.625), Vector3(.28, 3.4, 10.75))
-			make_box(Vector3(x, y + 1.7, 6.625), Vector3(.28, 3.4, 10.75))
-		if floor < 4:
-			make_box(Vector3(0, y + 1.7, 8), Vector3(3, .25, 7.2), deg_to_rad(25.3))
+		# Divider panels are placed on the actual bay edges (±4), leaving a 2.5m aperture in every bay.
+		for z in [-4.0, 4.0]:
+			for x in [-8.0, 0.0, 8.0]:
+				make_box(Vector3(x - 2.625, y + 1.7, z), Vector3(2.75, 3.4, .28))
+				make_box(Vector3(x + 2.625, y + 1.7, z), Vector3(2.75, 3.4, .28))
+		for x in [-4.0, 4.0]:
+			for z in [-8.0, 0.0, 8.0]:
+				make_box(Vector3(x, y + 1.7, z - 2.625), Vector3(.28, 3.4, 2.75))
+				make_box(Vector3(x, y + 1.7, z + 2.625), Vector3(.28, 3.4, 2.75))
