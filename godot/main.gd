@@ -2,10 +2,12 @@ extends Node3D
 
 const PLAYER_SCENE := preload("res://godot/player.tscn")
 const PORT := 7000
-var peer := ENetMultiplayerPeer.new()
+const CONNECT_TIMEOUT_SECONDS := 8.0
+var peer: ENetMultiplayerPeer
 var spawned := {}
 var room_size := 8.0
 var floor_height := 3.4
+var joining := false
 
 func _ready() -> void:
 	$Lobby/Panel/Box/Single.pressed.connect(start_single_player)
@@ -15,11 +17,18 @@ func _ready() -> void:
 	$PauseMenu/Panel/Box/Exit.pressed.connect(exit_game)
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	multiplayer.connected_to_server.connect(_on_connected_to_server)
+	multiplayer.connection_failed.connect(_on_connection_failed)
+	multiplayer.server_disconnected.connect(_on_server_disconnected)
 	make_level_collision()
 	# The procedural runtime mesh mirrors the Blender source (art/netshooter_house.blend).
 	# The GLB is retained in godot/assets for editor-side art replacement.
 	if "--single" in OS.get_cmdline_user_args(): start_single_player()
 	if "--host" in OS.get_cmdline_user_args(): host_game()
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--join="):
+			$Lobby/Panel/Box/Address.text = argument.trim_prefix("--join=")
+			call_deferred("join_game")
 
 func start_single_player() -> void:
 	$Lobby.hide()
@@ -45,20 +54,53 @@ func exit_game() -> void:
 	get_tree().quit()
 
 func host_game() -> void:
-	peer.create_server(PORT)
+	peer = ENetMultiplayerPeer.new()
+	var result := peer.create_server(PORT)
+	if result != OK:
+		$Lobby/Panel/Box/Status.text = "Не удалось открыть порт %s: %s" % [PORT, error_string(result)]
+		return
 	multiplayer.multiplayer_peer = peer
 	$Lobby.hide()
 	spawn_player.rpc(1)
 
 func join_game() -> void:
+	if joining: return
 	var address: String = $Lobby/Panel/Box/Address.text.strip_edges()
-	peer.create_client(address if address else "127.0.0.1", PORT)
+	peer = ENetMultiplayerPeer.new()
+	var result := peer.create_client(address if address else "127.0.0.1", PORT)
+	if result != OK:
+		$Lobby/Panel/Box/Status.text = "Неверный адрес: %s" % error_string(result)
+		return
 	multiplayer.multiplayer_peer = peer
+	joining = true
 	$Lobby/Panel/Box/Status.text = "Подключение…"
-	multiplayer.connected_to_server.connect(func(): $Lobby.hide())
+	get_tree().create_timer(CONNECT_TIMEOUT_SECONDS).timeout.connect(_on_connection_timeout)
+
+func _on_connected_to_server() -> void:
+	joining = false
+	$Lobby.hide()
+	print("Connected to Netshooter server")
+
+func _on_connection_failed() -> void:
+	joining = false
+	$Lobby/Panel/Box/Status.text = "Подключение не удалось. Проверьте IP и UDP-порт %s." % PORT
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+
+func _on_connection_timeout() -> void:
+	if !joining: return
+	joining = false
+	$Lobby/Panel/Box/Status.text = "Таймаут. Разрешите Godot UDP %s в Windows Firewall." % PORT
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+
+func _on_server_disconnected() -> void:
+	joining = false
+	$Lobby.show()
+	$Lobby/Panel/Box/Status.text = "Сервер отключился."
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 
 func _on_peer_connected(id: int) -> void:
 	if !multiplayer.is_server(): return
+	print("Player connected: %s" % id)
 	for existing in spawned.keys(): spawn_player.rpc_id(id, existing)
 	spawn_player.rpc(id)
 
