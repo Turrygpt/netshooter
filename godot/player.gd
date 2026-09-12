@@ -11,6 +11,7 @@ const THIRD_PERSON_DISTANCE := 3.5
 const LADDER_POSITION := Vector3(-1.15, 0, 8)
 const LADDER_CLIMB_SPEED := 2.7
 const LADDER_TOP := 3.42
+const LADDER_APPROACH_CLEARANCE := 0.15
 var pitch := 0.0
 var yaw := 0.0
 var fire_cooldown := 0.0
@@ -66,7 +67,9 @@ func _physics_process(delta: float) -> void:
 	if multiplayer.has_multiplayer_peer(): sync_state.rpc(global_position, rotation.y, $CameraBoom.rotation.x)
 
 func is_near_ladder() -> bool:
-	return abs(global_position.x - LADDER_POSITION.x) < .9 and abs(global_position.z - LADDER_POSITION.z) < .8 and global_position.y >= -.1 and global_position.y <= LADDER_TOP + .2
+	# The ladder can only be mounted from its west/opposite side. The current
+	# room-side approach (x greater than the ladder) is deliberately rejected.
+	return global_position.x < LADDER_POSITION.x - LADDER_APPROACH_CLEARANCE and abs(global_position.z - LADDER_POSITION.z) < .8 and global_position.y >= -.1 and global_position.y <= LADDER_TOP + .2
 
 func climb_ladder(axis: float, delta: float) -> void:
 	# Snap gently onto the rails, then W climbs upward and S descends.
