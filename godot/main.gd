@@ -6,7 +6,7 @@ const FLOOR_TEXTURE := preload("res://godot/assets/textures/floor_tiles.png")
 const CEILING_TEXTURE := preload("res://godot/assets/textures/ceiling_panels.png")
 const GLASS_TEXTURE := preload("res://godot/assets/textures/window_glass.png")
 const LADDER_TEXTURE := preload("res://godot/assets/textures/ladder_metal.png")
-const PORT := 7000
+const PORT := 7777
 const CONNECT_TIMEOUT_SECONDS := 8.0
 var peer: ENetMultiplayerPeer
 var spawned := {}
@@ -61,13 +61,30 @@ func exit_game() -> void:
 
 func host_game() -> void:
 	peer = ENetMultiplayerPeer.new()
+	peer.set_bind_ip("*")
 	var result := peer.create_server(PORT)
 	if result != OK:
 		$Lobby/Panel/Box/Status.text = "Не удалось открыть порт %s: %s" % [PORT, error_string(result)]
 		return
 	multiplayer.multiplayer_peer = peer
 	$Lobby.hide()
+	show_host_address()
 	spawn_player.rpc(1)
+
+func show_host_address() -> void:
+	var addresses: Array[String] = []
+	for address in IP.get_local_addresses():
+		if address.contains(".") and !address.begins_with("127.") and !address.begins_with("169.254."):
+			addresses.append(address)
+	var hud := CanvasLayer.new()
+	hud.name = "HostAddressHUD"
+	var label := Label.new()
+	label.position = Vector2(18, 18)
+	label.add_theme_font_size_override("font_size", 18)
+	label.add_theme_color_override("font_color", Color("b9ddff"))
+	label.text = "LAN-сервер UDP %s | IP: %s" % [PORT, ", ".join(addresses) if !addresses.is_empty() else "не найден"]
+	hud.add_child(label)
+	add_child(hud)
 
 func join_game() -> void:
 	if joining: return
@@ -95,7 +112,7 @@ func _on_connection_failed() -> void:
 func _on_connection_timeout() -> void:
 	if !joining: return
 	joining = false
-	$Lobby/Panel/Box/Status.text = "Таймаут. Разрешите Godot UDP %s в Windows Firewall." % PORT
+	$Lobby/Panel/Box/Status.text = "Хост недоступен. Проверьте IP и разрешите входящий UDP %s в Firewall на компьютере хоста." % PORT
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 
 func _on_server_disconnected() -> void:
@@ -150,6 +167,7 @@ func make_box(position: Vector3, size: Vector3, rotate_x := 0.0, color := Color(
 	var mesh := BoxMesh.new(); mesh.size = size
 	var paint := StandardMaterial3D.new(); paint.albedo_color = Color.WHITE if texture else color; paint.roughness = .35 if color == Color("4b9bd0") else .8
 	paint.albedo_texture = texture
+	paint.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	visible.mesh = mesh; visible.material_override = paint; wall.add_child(visible)
 	if collidable:
 		var collider := CollisionShape3D.new()

@@ -258,9 +258,9 @@ func is_near_ladder() -> bool:
 	if abs(global_position.z - LADDER_POSITION.z) >= .8 or global_position.y < -.1 or global_position.y > LADDER_TOP + .2:
 		return false
 	# Mount from the east side, facing the open part of the hatch. At roof level
-	# the west landing remains available so the player can start descending.
+	# the east landing remains available so the player can start descending.
 	if global_position.y > 3.0:
-		return abs(global_position.x + 1.7) < .9
+		return abs(global_position.x - 1.7) < .9
 	var approach_offset := global_position.x - LADDER_POSITION.x
 	return approach_offset > LADDER_APPROACH_CLEARANCE and approach_offset < LADDER_APPROACH_REACH
 
@@ -272,8 +272,8 @@ func climb_ladder(axis: float, delta: float) -> void:
 	velocity = Vector3(0, axis * LADDER_CLIMB_SPEED, 0)
 	move_and_slide()
 	if global_position.y >= LADDER_TOP:
-		# Step out onto the solid roof panel beside the hatch.
-		global_position = Vector3(-1.7, 3.55, LADDER_POSITION.z)
+		# Step out onto the solid east roof panel, away from the hatch rim.
+		global_position = Vector3(1.7, 3.58, LADDER_POSITION.z)
 		velocity = Vector3.ZERO
 		climbing = false
 	elif global_position.y <= .05 and axis < 0.0:

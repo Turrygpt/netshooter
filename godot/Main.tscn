@@ -41,7 +41,7 @@ text = "Создать LAN-лобби"
 text = "Подключиться"
 
 [node name="Status" type="Label" parent="Lobby/Panel/Box"]
-text = "Порт: 7000 · Урон отключён"
+text = "Порт: 7777 · Урон отключён"
 
 [node name="PauseMenu" type="CanvasLayer" parent="."]
 process_mode = 3
