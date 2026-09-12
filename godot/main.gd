@@ -11,6 +11,8 @@ func _ready() -> void:
 	$Lobby/Panel/Box/Single.pressed.connect(start_single_player)
 	$Lobby/Panel/Box/Host.pressed.connect(host_game)
 	$Lobby/Panel/Box/Join.pressed.connect(join_game)
+	$PauseMenu/Panel/Box/Resume.pressed.connect(resume_game)
+	$PauseMenu/Panel/Box/Exit.pressed.connect(exit_game)
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	make_level_collision()
@@ -22,6 +24,25 @@ func _ready() -> void:
 func start_single_player() -> void:
 	$Lobby.hide()
 	spawn_player(1)
+
+func _input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and !$Lobby.visible:
+		if $PauseMenu.visible: resume_game()
+		else: pause_game()
+		get_viewport().set_input_as_handled()
+
+func pause_game() -> void:
+	$PauseMenu.show()
+	get_tree().paused = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+func resume_game() -> void:
+	$PauseMenu.hide()
+	get_tree().paused = false
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+func exit_game() -> void:
+	get_tree().quit()
 
 func host_game() -> void:
 	peer.create_server(PORT)

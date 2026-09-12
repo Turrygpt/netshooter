@@ -42,3 +42,27 @@ text = "Подключиться"
 
 [node name="Status" type="Label" parent="Lobby/Panel/Box"]
 text = "Порт: 7000 · Урон отключён"
+
+[node name="PauseMenu" type="CanvasLayer" parent="."]
+process_mode = 3
+layer = 2
+visible = false
+
+[node name="Panel" type="PanelContainer" parent="PauseMenu"]
+offset_left = 760.0
+offset_top = 390.0
+offset_right = 1160.0
+offset_bottom = 690.0
+
+[node name="Box" type="VBoxContainer" parent="PauseMenu/Panel"]
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="PauseMenu/Panel/Box"]
+text = "ПАУЗА"
+horizontal_alignment = 1
+
+[node name="Resume" type="Button" parent="PauseMenu/Panel/Box"]
+text = "Продолжить"
+
+[node name="Exit" type="Button" parent="PauseMenu/Panel/Box"]
+text = "Выйти из игры"
