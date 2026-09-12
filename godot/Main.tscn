@@ -1,0 +1,41 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://godot/main.gd" id="1"]
+
+[node name="Netshooter" type="Node3D"]
+script = ExtResource("1")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-55, -25, 0)
+light_energy = 1.4
+
+[node name="Lobby" type="CanvasLayer" parent="."]
+
+[node name="Panel" type="PanelContainer" parent="Lobby"]
+offset_left = 28.0
+offset_top = 28.0
+offset_right = 368.0
+offset_bottom = 265.0
+
+[node name="Box" type="VBoxContainer" parent="Lobby/Panel"]
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Lobby/Panel/Box"]
+text = "NETSHOOTER — LAN LOBBY"
+
+[node name="Hint" type="Label" parent="Lobby/Panel/Box"]
+text = "Host создаёт комнату. Join подключается к IP хоста.\nWASD — бег, мышь — обзор, ЛКМ — выстрел."
+autowrap_mode = 2
+
+[node name="Address" type="LineEdit" parent="Lobby/Panel/Box"]
+placeholder_text = "IP хоста"
+text = "127.0.0.1"
+
+[node name="Host" type="Button" parent="Lobby/Panel/Box"]
+text = "Создать LAN-лобби"
+
+[node name="Join" type="Button" parent="Lobby/Panel/Box"]
+text = "Подключиться"
+
+[node name="Status" type="Label" parent="Lobby/Panel/Box"]
+text = "Порт: 7000 · Урон отключён"

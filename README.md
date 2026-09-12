@@ -1,15 +1,15 @@
-# Netshooter
+# Netshooter — Godot 4
 
-Five-floor LAN shooter prototype. Each floor contains an identical 3 × 3 grid of 8 m rooms (45 rooms total). The center connects to side rooms, sides connect to corners, and a gentle ramp in the north room goes to the next floor.
+LAN-шутер на Godot 4. Каждый из пяти этажей — одинаковая сетка 3 × 3 из комнат 8 × 8 м: всего 45 комнат. Центральная комната ведёт в боковые, боковые — в угловые. В северной комнате расположен пологий подъём на следующий этаж.
 
-## Run the LAN lobby
+## Запуск
 
-1. Install dependencies: `cd web; npm install`
-2. Start the host: `npm start`
-3. On the host and other machines on the same network, open `http://HOST_LAN_IP:8080`.
+1. Откройте корневую папку проекта в Godot 4.7+.
+2. На компьютере-хосте нажмите «Создать LAN-лобби».
+3. На других машинах введите локальный IP хоста и нажмите «Подключиться».
 
-The host may need to allow Node.js through the Windows private-network firewall prompt. Use WASD to move, mouse to look, and left-click to fire. Position, facing direction, player join/leave events, and visible shots are synchronized. There are intentionally no hit points, hit detection, or damage.
+Используйте WASD для движения, мышь для обзора и ЛКМ для стрельбы. Godot синхронизирует игроков и визуальные выстрелы по ENet на порту `7000`; здоровья, попаданий и урона пока нет. При первом запуске разрешите Godot доступ к частной сети в Windows Firewall.
 
-## Blender source
+## Blender
 
-Run `& 'C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe' --background --python tools/build_house.py` to regenerate the authoring scene and GLB. The resulting source is `art/netshooter_house.blend`; the runtime level asset is `web/public/netshooter_house.glb`.
+[Исходная сцена](art/netshooter_house.blend) создаётся скриптом `tools/build_house.py`. Её экспорт GLB хранится в `godot/assets/`; Godot-коллайдеры создаются по той же модульной схеме, чтобы проходы и подъёмы были физически проходимы.
