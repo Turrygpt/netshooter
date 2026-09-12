@@ -1,0 +1,16 @@
+{
+  "schema": "game-room.room-brief.v1",
+  "roomId": "netshooter-house",
+  "family": "gameplay-room",
+  "purpose": "Network shooter prototype: 5 identical playable floors, nine rooms each, with clear routes and non-damaging shooting.",
+  "runtimeSurface": "Browser WebGL client plus Node.js WebSocket LAN lobby; authored source is Blender.",
+  "boundsMeters": [24, 24, 17],
+  "hero": {"id": "player-doll", "role": "Third-person mannequin holding a pistol", "reservedBoundsMeters": [1.2, 1.2, 2.2]},
+  "symmetry": {"mode": "grid", "order": 4, "appliesTo": ["nine-room floor plan", "door apertures", "circulation guides"], "exceptions": ["The ramp occupies the north side room to establish a reliable vertical route."]},
+  "circulation": {"description": "Each floor is a 3 by 3 grid. Central room opens to all four side rooms; every side room opens to its two adjacent corners. A 3m-wide shallow ramp joins each floor to the next.", "minimumClearanceMeters": 2.5},
+  "productionCamera": {"viewport": [1280, 720], "location": [18, -22, 16], "target": [0, 0, 5], "verticalFovDegrees": 47},
+  "performanceBudget": {"maxSceneTriangles": 150000, "maxVLowBytes": 10000000, "maxHighTextureBytes": 20000000},
+  "creditBudget": {"maximumCredits": 0, "approvalRequired": true},
+  "environment": {"type": "none", "identity": "", "source": "", "assignmentKey": ""},
+  "artifacts": {"floorPlan": "plans/floor-grid.md", "reflectedCeilingPlan": "", "planMetadata": "plan-metadata.json", "wallElevations": [], "visualTarget": "art/netshooter_house.blend", "openingContactSheet": ""}
+}

@@ -1,0 +1,4 @@
+web/node_modules/
+web/package-lock.json
+__pycache__/
+*.blend1

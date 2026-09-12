@@ -1,0 +1,12 @@
+{
+  "schema": "game-room.opening-schedule.v1",
+  "roomId": "netshooter-house",
+  "primaryArrival": {"openingId": "central-to-north", "exception": "Primary arrival is internal central-room circulation rather than an exterior entrance."},
+  "openings": [
+    {"id":"central-to-north","type":"door","widthMeters":2.5,"heightMeters":2.3,"from":"center","to":"north-side","repeat":"each floor"},
+    {"id":"central-to-south","type":"door","widthMeters":2.5,"heightMeters":2.3,"from":"center","to":"south-side","repeat":"each floor"},
+    {"id":"central-to-east","type":"door","widthMeters":2.5,"heightMeters":2.3,"from":"center","to":"east-side","repeat":"each floor"},
+    {"id":"central-to-west","type":"door","widthMeters":2.5,"heightMeters":2.3,"from":"center","to":"west-side","repeat":"each floor"},
+    {"id":"side-to-corner","type":"door","widthMeters":2.5,"heightMeters":2.3,"from":"side","to":"adjacent-corner","repeat":"eight per floor"}
+  ]
+}
