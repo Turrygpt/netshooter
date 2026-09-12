@@ -9,9 +9,11 @@ const STANDING_HEIGHT := 1.8
 const CROUCHING_HEIGHT := 1.25
 const THIRD_PERSON_DISTANCE := 3.5
 const LADDER_POSITION := Vector3(-1.15, 0, 8)
+const LADDER_CLIMB_POSITION_X := -0.75
 const LADDER_CLIMB_SPEED := 2.7
 const LADDER_TOP := 3.42
 const LADDER_APPROACH_CLEARANCE := 0.15
+const LADDER_APPROACH_REACH := 1.05
 const AK47_MAGAZINE_SIZE := 30
 const AK47_FIRE_INTERVAL := .095
 const AK47_RELOAD_TIME := 1.7
@@ -253,13 +255,19 @@ func _physics_process(delta: float) -> void:
 	if multiplayer.has_multiplayer_peer(): sync_state.rpc(global_position, rotation.y, $CameraBoom.rotation.x)
 
 func is_near_ladder() -> bool:
-	# The ladder can only be mounted from its west/opposite side. The current
-	# room-side approach (x greater than the ladder) is deliberately rejected.
-	return global_position.x < LADDER_POSITION.x - LADDER_APPROACH_CLEARANCE and abs(global_position.z - LADDER_POSITION.z) < .8 and global_position.y >= -.1 and global_position.y <= LADDER_TOP + .2
+	if abs(global_position.z - LADDER_POSITION.z) >= .8 or global_position.y < -.1 or global_position.y > LADDER_TOP + .2:
+		return false
+	# Mount from the east side, facing the open part of the hatch. At roof level
+	# the west landing remains available so the player can start descending.
+	if global_position.y > 3.0:
+		return abs(global_position.x + 1.7) < .9
+	var approach_offset := global_position.x - LADDER_POSITION.x
+	return approach_offset > LADDER_APPROACH_CLEARANCE and approach_offset < LADDER_APPROACH_REACH
 
 func climb_ladder(axis: float, delta: float) -> void:
 	# Snap gently onto the rails, then W climbs upward and S descends.
-	global_position.x = move_toward(global_position.x, LADDER_POSITION.x, delta * 4.0)
+	# Keep the capsule inside the hatch opening instead of directly under its rim.
+	global_position.x = move_toward(global_position.x, LADDER_CLIMB_POSITION_X, delta * 4.0)
 	global_position.z = move_toward(global_position.z, LADDER_POSITION.z, delta * 4.0)
 	velocity = Vector3(0, axis * LADDER_CLIMB_SPEED, 0)
 	move_and_slide()
