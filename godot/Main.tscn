@@ -7,7 +7,7 @@ script = ExtResource("1")
 
 [node name="Sun" type="DirectionalLight3D" parent="."]
 rotation_degrees = Vector3(-55, -25, 0)
-light_energy = 1.4
+light_energy = 0.08
 
 [node name="Lobby" type="CanvasLayer" parent="."]
 

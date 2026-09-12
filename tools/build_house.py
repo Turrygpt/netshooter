@@ -7,21 +7,36 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "art" / "netshooter_house.blend"
 GLB = ROOT / "godot" / "assets" / "netshooter_house.glb"
+TEXTURES = ROOT / "godot" / "assets" / "textures"
 
 for obj in list(bpy.data.objects):
     bpy.data.objects.remove(obj, do_unlink=True)
 
-def mat(name, color, metallic=0.0, roughness=0.6):
+def mat(name, color, metallic=0.0, roughness=0.6, texture_name=None):
     m = bpy.data.materials.new(name); m.diffuse_color = (*color, 1)
     m.metallic = metallic; m.roughness = roughness
+    if texture_name:
+        texture_path = TEXTURES / texture_name
+        if texture_path.exists():
+            m.use_nodes = True
+            nodes = m.node_tree.nodes
+            image = bpy.data.images.load(str(texture_path), check_existing=True)
+            texture = nodes.new("ShaderNodeTexImage"); texture.image = image
+            shader = nodes.get("Principled BSDF")
+            m.node_tree.links.new(texture.outputs["Color"], shader.inputs["Base Color"])
+            shader.inputs["Roughness"].default_value = roughness
+            shader.inputs["Metallic"].default_value = metallic
     return m
 
-CONCRETE = mat("Concrete", (0.24, 0.27, 0.32), 0, .82)
-FLOOR = mat("Floor", (0.11, 0.13, 0.16), .05, .7)
+CONCRETE = mat("Concrete", (0.24, 0.27, 0.32), 0, .82, "wall_concrete.png")
+FLOOR = mat("Floor", (0.11, 0.13, 0.16), .05, .7, "floor_tiles.png")
+CEILING = mat("Acoustic ceiling", (.28, .3, .34), 0, .9, "ceiling_panels.png")
 TRIM = mat("Safety yellow", (.95, .54, .05), .15, .4)
 GUN = mat("Gun metal", (.04, .05, .06), .8, .26)
 PLAYER = mat("Player mannequin", (.12, .55, .95), .1, .45)
-WINDOW = mat("Window glow", (.14, .55, .9), .1, .25)
+WINDOW = mat("Window glow", (.14, .55, .9), .1, .25, "window_glass.png")
+LADDER = mat("Ladder metal", (.08, .09, .1), .8, .4, "ladder_metal.png")
+LAMP = mat("Cold fluorescent lamp", (.55, .8, 1.0), .0, .2)
 
 def box(name, loc, scale, material, bevel=0.0):
     bpy.ops.mesh.primitive_cube_add(location=loc)
@@ -55,11 +70,26 @@ for floor in range(FLOORS):
     for gx in (-1,0,1):
         for gy in (-1,0,1):
             box(f"F{floor+1}_Room_{gx+2}{gy+2}_floor", (gx*ROOM,gy*ROOM,z-.15), (ROOM-.08,ROOM-.08,.3), FLOOR)
-            # ceiling slab on every room, except the four metres above a ramp exit
-            box(f"F{floor+1}_Room_{gx+2}{gy+2}_ceiling", (gx*ROOM,gy*ROOM,z+H), (ROOM-.08,ROOM-.08,.18), CONCRETE)
-    # exterior envelope
-    for x in (-12,12): box(f"F{floor+1}_outer_x", (x,0,z+H/2), (.35,24,H), CONCRETE,.04)
-    for y in (-12,12): box(f"F{floor+1}_outer_y", (0,y,z+H/2), (24,.35,H), CONCRETE,.04)
+            if gx == 0 and gy == 1:
+                # North room: a 2.4m square ceiling hatch, framed by four structural slabs.
+                for side in (-1, 1):
+                    box(f"F{floor+1}_north_hatch_side", (side*2.6,gy*ROOM,z+H), (2.8,ROOM-.08,.18), CEILING)
+                    box(f"F{floor+1}_north_hatch_end", (0,gy*ROOM + side*2.6,z+H), (2.4,2.8,.18), CEILING)
+            else:
+                box(f"F{floor+1}_Room_{gx+2}{gy+2}_ceiling", (gx*ROOM,gy*ROOM,z+H), (ROOM-.08,ROOM-.08,.18), CEILING)
+    # Exterior office facade: each outer room bay gets a framed 4.2m × 1.4m glazed window.
+    for x in (-12,12):
+        for y in (-8,0,8):
+            box(f"F{floor+1}_facade_lower", (x,y,z+.7), (.35,8,1.4), CONCRETE,.04)
+            box(f"F{floor+1}_facade_upper", (x,y,z+2.9), (.35,8,1.0), CONCRETE,.04)
+            for side in (-1,1): box(f"F{floor+1}_facade_pier", (x,y+side*3.05,z+H/2), (.35,1.9,H), CONCRETE,.04)
+            box(f"F{floor+1}_office_window", (x,y,z+2.0), (.09,4.2,1.4), WINDOW,.01)
+    for y in (-12,12):
+        for x in (-8,0,8):
+            box(f"F{floor+1}_facade_lower", (x,y,z+.7), (8,.35,1.4), CONCRETE,.04)
+            box(f"F{floor+1}_facade_upper", (x,y,z+2.9), (8,.35,1.0), CONCRETE,.04)
+            for side in (-1,1): box(f"F{floor+1}_facade_pier", (x+side*3.05,y,z+H/2), (1.9,.35,H), CONCRETE,.04)
+            box(f"F{floor+1}_office_window", (x,y,z+2.0), (4.2,.09,1.4), WINDOW,.01)
     # Two structural dividers per axis, split per room bay. Each bay has a real 2.5 m aperture.
     # This yields center→side and side→corner routes, without walls running through room centers.
     for y in (-4,4):
@@ -71,6 +101,19 @@ for floor in range(FLOORS):
     # yellow guides distinguish the central-room circulation routes.
     box(f"F{floor+1}_guide_x", (0,0,z+.02), (21,.12,.04), TRIM)
     box(f"F{floor+1}_guide_y", (0,0,z+.02), (.12,21,.04), TRIM)
+
+# Ladder is turned 90 degrees and hugs the left (west) edge of the north-room hatch.
+LADDER_X = -1.15
+for z in (7.35, 8.65):
+    cylinder("North_room_ladder_rail", (LADDER_X,z,H/2), .055, H-.25, LADDER)
+for rung in range(7):
+    cylinder("North_room_ladder_rung", (LADDER_X,8,.35 + rung*.42), .045, 1.4, LADDER)
+
+# Sparse cold ceiling fixtures create pools of light, leaving unlit side rooms deliberately dark.
+for x, y in ((0,0), (-8,-8), (8,-8), (-8,8), (8,8)):
+    box("Ceiling_fluorescent_fixture", (x,y,H-.14), (1.5,.35,.10), LAMP,.02)
+    bpy.ops.object.light_add(type='AREA', location=(x,y,H-.22))
+    fixture_light=bpy.context.object; fixture_light.name="Cold_ceiling_light"; fixture_light.data.energy=450; fixture_light.data.shape='RECTANGLE'; fixture_light.data.size=3.0; fixture_light.data.color=(.55,.75,1.0)
 
 # simple player doll in central ground room
 base=Vector((0,0,.2))
@@ -84,8 +127,9 @@ gun=box("Working_pistol_visual", (.72,-.02,1.2), (.65,.18,.24), GUN,.025)
 box("Pistol_grip", (.56,-.02,1.02), (.16,.16,.42), GUN,.02)
 cylinder("Pistol_barrel", (1.05,-.02,1.2), .06,.24,GUN,(0,math.pi/2,0))
 
-# lighting and review camera
-bpy.ops.object.light_add(type='AREA', location=(0,0,14)); bpy.context.object.data.energy=1800; bpy.context.object.data.shape='DISK'; bpy.context.object.data.size=16
+# Dark ambient baseline; only the selected ceiling fixtures light the floor.
+bpy.context.scene.world.color=(.005,.008,.015)
+# review camera
 bpy.ops.object.camera_add(location=(18,-22,16)); cam=bpy.context.object; cam.name='Production_Camera'; bpy.context.scene.camera=cam
 def look(obj, target): obj.rotation_euler=(Vector(target)-obj.location).to_track_quat('-Z','Y').to_euler()
 look(cam,(0,0,5)); cam.data.lens=28
