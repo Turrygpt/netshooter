@@ -52,8 +52,7 @@ BONES = [
 
 # A bone may only take real ownership of the body part it belongs to. Pure distance
 # weighting would let the thighs grab the hands and the upper arms grab the ribs,
-# because in an A-pose those surfaces are only centimetres apart. Bones from another
-# region keep a small influence so the seams between regions still blend.
+# because in an A-pose those surfaces are only centimetres apart.
 REGIONS = {
     "hips": "torso", "spine": "torso", "chest": "torso", "neck": "torso",
     "head": "torso", "head_tip": "torso",
@@ -65,7 +64,17 @@ REGIONS = {
     "thigh.R": "leg.R", "shin.R": "leg.R", "foot.R": "leg.R", "toe.R": "leg.R",
 }
 
-CROSS = 0.05       # how much a bone from a neighbouring region may still pull
+# Classifying a vertex by "which bone segment is nearest in 3D" breaks down for an
+# A-pose character: the diagonal upper-arm/forearm segments swing out close enough
+# to the ribcage that belt- and vest-height torso geometry ends up nearer to the arm
+# bone than to the spine, even though it plainly belongs to the torso. Measuring the
+# actual mesh (see tools/measure notes) shows a real physical gap between torso and
+# arm surfaces at every height — torso never reaches past |x|=0.148, the arm cluster
+# never starts before |x|=0.141 — so a hard gate on top of nearest-bone matching
+# removes the false long-range pulls without cutting through the armpit.
+ARM_X = 0.150      # outside this the surface belongs to an arm
+ARM_Y = 0.430      # ... as long as it is above the hips
+LEG_Y = 0.450      # below this, and off the centre line, the surface is a leg
 FALLOFF = 3.0      # weight = 1 / (distance + eps) ** FALLOFF
 SMOOTH_PASSES = 4
 
@@ -113,22 +122,31 @@ def build_weights(points, bone_index, heads, parents):
         if parent and parent not in first_child:
             first_child[parent] = name
 
-    order = [name for name, _, _ in BONES]
-    distances = np.empty((len(points), len(order)))
-    for column, name in enumerate(order):
-        tail = first_child.get(name)
-        distances[:, column] = segment_distance(points, heads[name], heads[tail] if tail else heads[name])
-    # A vertex belongs to the body part of the bone it actually sits on. A plane
-    # through the shoulder would cut the armpit in half and leave the inner sleeve
-    # behind when the arm swings.
-    nearest = distances.argmin(axis=1)
-    region = np.array([REGIONS[order[column]] for column in nearest], dtype=object)
+    # Region membership comes from the measured, anatomically real torso/arm/leg
+    # gate, not from raw nearest-bone distance (see the ARM_X comment above for why
+    # that alone is unsafe). A vertex may only be weighted against bones in its own
+    # region, so a torso surface can never be dragged along by a limb swinging away
+    # from the body, no matter how close the limb's rest-pose bone happens to pass.
+    left = points[:, 0] > 0
+    is_arm = (np.abs(points[:, 0]) > ARM_X) & (points[:, 1] > ARM_Y)
+    is_leg = (points[:, 1] < LEG_Y) & (np.abs(points[:, 0]) > 0.015) & ~is_arm
+    region = np.full(len(points), "torso", dtype=object)
+    region[is_arm & left] = "arm.L"
+    region[is_arm & ~left] = "arm.R"
+    region[is_leg & left] = "leg.L"
+    region[is_leg & ~left] = "leg.R"
 
     weights = np.zeros((len(points), len(bone_index)), dtype=np.float64)
-    for column, name in enumerate(order):
+    for name, index in bone_index.items():
+        tail = first_child.get(name)
         own = region == REGIONS[name]
-        weights[:, bone_index[name]] = 1.0 / (distances[:, column] + 0.012) ** FALLOFF * np.where(own, 1.0, CROSS)
+        if not own.any():
+            continue
+        distance = segment_distance(points[own], heads[name], heads[tail] if tail else heads[name])
+        weights[own, index] = 1.0 / (distance + 0.012) ** FALLOFF
     return weights
+
+
 def smooth_weights(weights, indices, passes):
     # Averaging along mesh edges removes the hard seam where two regions meet, which
     # is what makes an automatic rig look like a paper doll when it bends.

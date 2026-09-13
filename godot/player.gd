@@ -283,8 +283,9 @@ func glove_material(color: Color) -> StandardMaterial3D:
 	# Cloth and rubber: no specular highlight, so hands stay readable against the rifle.
 	var glove := StandardMaterial3D.new()
 	glove.albedo_color = color
-	glove.roughness = .95
-	glove.metallic_specular = .15
+	glove.metallic = 0.0
+	glove.roughness = 1.0
+	glove.metallic_specular = 0.0
 	return glove
 
 func add_glove_mass(parent: Node3D, size: Vector3, offset: Vector3, tilt_degrees: Vector3, color: Color) -> MeshInstance3D:
@@ -294,8 +295,8 @@ func add_glove_mass(parent: Node3D, size: Vector3, offset: Vector3, tilt_degrees
 	var ball := SphereMesh.new()
 	ball.radius = .5
 	ball.height = 1.0
-	ball.radial_segments = 12
-	ball.rings = 6
+	ball.radial_segments = 20
+	ball.rings = 10
 	part.mesh = ball
 	part.scale = size
 	part.position = offset
@@ -326,8 +327,8 @@ func add_bone(parent: Node3D, length: float, radius: float, offset: Vector3, col
 	var capsule := CapsuleMesh.new()
 	capsule.radius = radius
 	capsule.height = maxf(length, radius * 2.0)
-	capsule.radial_segments = 8
-	capsule.rings = 2
+	capsule.radial_segments = 12
+	capsule.rings = 4
 	bone.mesh = capsule
 	bone.position = offset
 	bone.material_override = glove_material(color)
@@ -343,7 +344,7 @@ func add_forearm(parent: Node3D, offset: Vector3, elbow: Vector3) -> void:
 	var local_elbow: Vector3 = parent.transform.basis.inverse() * elbow
 	var bone := MeshInstance3D.new()
 	var capsule := CapsuleMesh.new()
-	capsule.radius = .022
+	capsule.radius = .032
 	capsule.height = maxf(local_elbow.length(), .056)
 	capsule.radial_segments = 10
 	capsule.rings = 2
@@ -376,7 +377,7 @@ func create_trigger_hand(parent: Node3D) -> Node3D:
 	parent.add_child(hand)
 	add_glove_mass(hand, Vector3(.040, .076, .046), Vector3(.005, -.004, .008), Vector3(0, 0, -3.0), GLOVE_COLOR)
 	add_glove_mass(hand, Vector3(.038, .032, .030), Vector3(.002, .028, -.014), Vector3(-8.0, 0, 0), GLOVE_PAD_COLOR)
-	var finger_rows := [.010, -.007, -.024]
+	var finger_rows := [.006, -.014]
 	for row in finger_rows.size():
 		add_finger(hand, "Finger%d" % row, .052 - row * .003, .011, Vector3(.024, finger_rows[row], -.020), Vector3(0, 8.0, -90.0), Vector3(0, 38.0, 0))
 	# The index finger keeps its own parent pivot so a shot can squeeze the trigger.
@@ -399,7 +400,7 @@ func create_support_hand(parent: Node3D) -> Node3D:
 	parent.add_child(hand)
 	add_glove_mass(hand, Vector3(.048, .038, .086), Vector3(0, -.013, .004), Vector3.ZERO, GLOVE_COLOR)
 	add_glove_mass(hand, Vector3(.022, .034, .076), Vector3(.024, .002, .002), Vector3(0, 0, -6.0), GLOVE_PAD_COLOR)
-	var finger_slots := [.032, .010, -.012, -.034]
+	var finger_slots := [.022, .000, -.022]
 	for slot in finger_slots.size():
 		add_finger(hand, "Finger%d" % slot, .058 - slot * .004, .0095, Vector3(.028, -.006, finger_slots[slot]), Vector3(0, 0, 186.0), Vector3(0, 0, 62.0))
 	add_finger(hand, "Thumb", .046, .0105, Vector3(-.022, .000, -.020), Vector3(98.0, 0, -16.0), Vector3(-22.0, 0, 0))
@@ -440,7 +441,7 @@ func create_audio_players() -> void:
 	footstep_player = AudioStreamPlayer3D.new()
 	footstep_player.name = "FootstepAudio"
 	footstep_player.stream = FOOTSTEP_SOUND
-	footstep_player.volume_db = -3.0
+	footstep_player.volume_db = -6.0
 	footstep_player.max_distance = 24.0
 	add_child(footstep_player)
 	jump_player = AudioStreamPlayer3D.new()
@@ -601,23 +602,6 @@ func create_character() -> void:
 	character = CHARACTER.new()
 	character.name = "Soldier"
 	add_child(character)
-	var tint := Color("36a6ff") if is_multiplayer_authority() else Color("ef6060")
-	var band := MeshInstance3D.new()
-	band.name = "TeamBand"
-	var ring := TorusMesh.new()
-	ring.inner_radius = .16
-	ring.outer_radius = .21
-	ring.rings = 12
-	ring.ring_segments = 8
-	band.mesh = ring
-	var glow := StandardMaterial3D.new()
-	glow.albedo_color = tint
-	glow.emission_enabled = true
-	glow.emission = tint
-	glow.emission_energy_multiplier = 1.6
-	band.material_override = glow
-	band.position = Vector3(0, 1.62, 0)
-	character.add_child(band)
 	create_world_weapon()
 
 func create_world_weapon() -> void:

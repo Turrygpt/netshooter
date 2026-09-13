@@ -16,8 +16,11 @@ const RUN_CYCLE := 2.35
 # Rifle axes expressed in skeleton space: the bore runs along the soldier's forward
 # (+Y) and the rifle's up points at the soldier's up (-Z).
 const RIFLE_BASIS := Basis(Vector3(-1, 0, 0), Vector3(0, 0, -1), Vector3(0, -1, 0))
-# Where the pistol grip sits relative to the chest bone, in skeleton space.
-const GRIP_FROM_CHEST := Vector3(-.05, -.02, .08)
+# Where the pistol grip sits relative to the chest bone, in skeleton space. Raised
+# above and pushed forward of the chest so the rifle sits at chest-to-shoulder
+# height with both arms extended, the way a soldier actually carries one, instead
+# of hanging low across the stomach.
+const GRIP_FROM_CHEST := Vector3(-.045, .055, -.075)
 const MAGAZINE_POUCH := Vector3(.15, .04, -.36)
 
 var skeleton: Skeleton3D
