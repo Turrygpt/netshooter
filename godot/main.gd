@@ -15,6 +15,8 @@ const GLASS_BREAK_SOUNDS := [
 	preload("res://assets/sfx/glass_break_4.mp3"),
 ]
 const MAX_BULLET_HOLES := 64
+# How long a smoke grenade keeps pumping out its cloud.
+const SMOKE_SECONDS := 11.0
 const PORT := 7777
 const CONNECT_TIMEOUT_SECONDS := 8.0
 var peer: ENetMultiplayerPeer
@@ -84,6 +86,17 @@ class GlassShard extends MeshInstance3D:
 					shard_material.albedo_color = tint
 			if fade >= 1.0:
 				queue_free()
+
+# A smoke grenade keeps emitting for a while and then lets the last puffs thin out
+# instead of vanishing in one frame.
+class SmokeCloud extends CPUParticles3D:
+	var seconds_left := SMOKE_SECONDS
+
+	func _process(delta: float) -> void:
+		seconds_left -= delta
+		if seconds_left > 0.0: return
+		emitting = false
+		if seconds_left < -lifetime: queue_free()
 
 func _ready() -> void:
 	$Lobby/Panel/Box/Single.pressed.connect(start_single_player)
@@ -216,12 +229,20 @@ func spawn_player(id: int) -> void:
 func make_atmosphere() -> void:
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color("050914")
+	environment.background_color = Color("8db8d5")
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environment.ambient_light_color = Color("162233")
 	environment.ambient_light_energy = .18
 	environment.glow_enabled = true
 	var world := WorldEnvironment.new(); world.environment = environment; add_child(world)
+	var sun := DirectionalLight3D.new()
+	sun.name = "DaylightSun"
+	sun.light_color = Color("fff0d0")
+	sun.light_energy = 1.15
+	sun.shadow_enabled = true
+	sun.directional_shadow_max_distance = 45.0
+	sun.rotation_degrees = Vector3(-52.0, -32.0, 0.0)
+	add_child(sun)
 
 func add_ceiling_lamp(position: Vector3, flicker := false) -> void:
 	var fixture := MeshInstance3D.new()
@@ -374,6 +395,171 @@ func resolve_projectile_hit(origin: Vector3, direction: Vector3, shooter_id: int
 		break_glass_at.rpc(hit.position, hit.normal)
 	else:
 		show_impact.rpc(hit.position, hit.normal)
+
+func resolve_explosion(point: Vector3, radius: float, damage: int) -> void:
+	# Server side, the way bullet hits are resolved: everyone inside the blast is hurt,
+	# the further out the less, and a wall between them and the grenade stops it. The
+	# thrower is not excluded — standing next to your own grenade hurts.
+	for node in get_tree().get_nodes_in_group("players"):
+		var target := node as Node3D
+		if target == null or !target.has_method("receive_damage"): continue
+		var chest := target.global_position + Vector3(0, .9, 0)
+		var distance := chest.distance_to(point)
+		if distance > radius: continue
+		var query := PhysicsRayQueryParameters3D.new()
+		query.from = point
+		query.to = chest
+		query.collision_mask = 1
+		query.exclude = [target.get_rid()]
+		if !get_world_3d().direct_space_state.intersect_ray(query).is_empty(): continue
+		var hurt := int(round(damage * (1.0 - distance / radius)))
+		if hurt <= 0: continue
+		if multiplayer.has_multiplayer_peer():
+			target.receive_damage.rpc_id(target.get_multiplayer_authority(), hurt)
+		else:
+			target.receive_damage(hurt)
+
+func show_explosion(point: Vector3, smoke: bool) -> void:
+	# Every peer detonates its own copy of the grenade, so this is a plain local call
+	# rather than an RPC.
+	play_blast_sound(point, smoke)
+	if smoke:
+		spawn_smoke_cloud(point)
+		return
+	spawn_blast_fire(point)
+	spawn_blast_sparks(point)
+	spawn_blast_smoke(point)
+	var light := OmniLight3D.new()
+	light.light_color = Color("ffb05a")
+	light.light_energy = 7.0
+	light.omni_range = 9.0
+	add_child(light)
+	light.global_position = point + Vector3(0, .3, 0)
+	var tween := create_tween()
+	tween.tween_property(light, "light_energy", 0.0, .32)
+	tween.tween_callback(light.queue_free)
+
+func play_blast_sound(point: Vector3, smoke: bool) -> void:
+	# There is no dedicated explosion sample in the project, so the bullet impact is
+	# dropped a couple of octaves: a short, heavy thud instead of a sharp crack.
+	var audio := AudioStreamPlayer3D.new()
+	audio.name = "GrenadeAudio"
+	audio.stream = BULLET_HIT_SOUND
+	audio.pitch_scale = .82 if smoke else .42
+	audio.volume_db = -6.0 if smoke else 6.0
+	audio.max_distance = 30.0 if smoke else 70.0
+	add_child(audio)
+	audio.global_position = point
+	audio.play()
+	audio.finished.connect(audio.queue_free)
+
+func spawn_blast_fire(point: Vector3) -> void:
+	var fire := CPUParticles3D.new()
+	fire.name = "GrenadeFire"
+	fire.amount = 24
+	fire.lifetime = .42
+	fire.one_shot = true
+	fire.explosiveness = 1.0
+	fire.spread = 180.0
+	fire.initial_velocity_min = 2.5
+	fire.initial_velocity_max = 8.5
+	fire.damping_min = 6.0
+	fire.damping_max = 12.0
+	fire.gravity = Vector3(0, 1.5, 0)
+	fire.particle_flag_align_y = true
+	fire.scale_amount_min = 1.2
+	fire.scale_amount_max = 2.6
+	fire.scale_amount_curve = FX.fade_curve(1.0, .3)
+	fire.color_ramp = FX.alpha_ramp(Color(1, .96, .82), Color(1, .42, .08, 0))
+	fire.mesh = FX.flame_mesh(.34, .62)
+	add_child(fire)
+	fire.global_position = point + Vector3(0, .15, 0)
+	fire.emitting = true
+	fire.finished.connect(fire.queue_free)
+
+func spawn_blast_sparks(point: Vector3) -> void:
+	var sparks := CPUParticles3D.new()
+	sparks.name = "GrenadeSparks"
+	sparks.amount = 34
+	sparks.lifetime = .6
+	sparks.one_shot = true
+	sparks.explosiveness = 1.0
+	sparks.spread = 180.0
+	sparks.initial_velocity_min = 6.0
+	sparks.initial_velocity_max = 17.0
+	sparks.damping_min = 1.0
+	sparks.damping_max = 3.5
+	sparks.gravity = Vector3(0, -11.0, 0)
+	sparks.particle_flag_align_y = true
+	sparks.scale_amount_min = .5
+	sparks.scale_amount_max = 1.3
+	sparks.scale_amount_curve = FX.fade_curve(1.0, .2)
+	sparks.color_ramp = FX.alpha_ramp(Color("fff4d2"), Color(1, .35, .05, 0))
+	sparks.mesh = FX.streak_mesh(.012, .26)
+	add_child(sparks)
+	sparks.global_position = point + Vector3(0, .1, 0)
+	sparks.emitting = true
+	sparks.finished.connect(sparks.queue_free)
+
+func spawn_blast_smoke(point: Vector3) -> void:
+	var smoke := CPUParticles3D.new()
+	smoke.name = "GrenadeSmoke"
+	smoke.amount = 18
+	smoke.lifetime = 1.9
+	smoke.one_shot = true
+	smoke.explosiveness = .85
+	smoke.spread = 180.0
+	smoke.initial_velocity_min = 1.0
+	smoke.initial_velocity_max = 4.5
+	smoke.damping_min = 2.0
+	smoke.damping_max = 4.0
+	smoke.gravity = Vector3(0, .5, 0)
+	smoke.angle_min = -180.0
+	smoke.angle_max = 180.0
+	smoke.angular_velocity_min = -25.0
+	smoke.angular_velocity_max = 25.0
+	smoke.scale_amount_min = .7
+	smoke.scale_amount_max = 1.5
+	smoke.scale_amount_curve = FX.fade_curve(1.0, 3.2)
+	smoke.color_ramp = FX.alpha_ramp(Color(.22, .21, .20, .75), Color(.42, .41, .40, 0))
+	smoke.mesh = FX.smoke_mesh(1.0)
+	add_child(smoke)
+	smoke.global_position = point + Vector3(0, .2, 0)
+	smoke.emitting = true
+	smoke.finished.connect(smoke.queue_free)
+
+func spawn_smoke_cloud(point: Vector3) -> void:
+	# A screening cloud: it keeps feeding itself for SMOKE_SECONDS and fills a ball a
+	# couple of metres across, enough to break a line of sight through a doorway.
+	var cloud := SmokeCloud.new()
+	cloud.name = "SmokeCloud"
+	cloud.amount = 90
+	cloud.lifetime = 3.4
+	cloud.preprocess = 1.2
+	cloud.spread = 180.0
+	cloud.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	cloud.emission_sphere_radius = 1.5
+	cloud.initial_velocity_min = .15
+	cloud.initial_velocity_max = .9
+	cloud.damping_min = .5
+	cloud.damping_max = 1.4
+	cloud.gravity = Vector3(0, .25, 0)
+	cloud.angle_min = -180.0
+	cloud.angle_max = 180.0
+	cloud.angular_velocity_min = -12.0
+	cloud.angular_velocity_max = 12.0
+	cloud.scale_amount_min = 1.6
+	cloud.scale_amount_max = 3.2
+	cloud.scale_amount_curve = FX.fade_curve(.6, 1.4)
+	# Each puff blooms in, hangs there opaque and thins out again.
+	var ramp := FX.alpha_ramp(Color(.88, .90, .92, 0), Color(.80, .82, .84, 0))
+	ramp.add_point(.22, Color(.86, .88, .90, .85))
+	ramp.add_point(.72, Color(.83, .85, .87, .78))
+	cloud.color_ramp = ramp
+	cloud.mesh = FX.smoke_mesh(1.0)
+	add_child(cloud)
+	cloud.global_position = point + Vector3(0, .8, 0)
+	cloud.emitting = true
 
 @rpc("authority", "call_local", "unreliable")
 func show_impact(point: Vector3, normal: Vector3, solid := true) -> void:

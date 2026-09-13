@@ -10,7 +10,10 @@ const CROUCHING_HEIGHT := 1.25
 const THIRD_PERSON_DISTANCE := 3.5
 const FX := preload("res://godot/fx.gd")
 const CHARACTER := preload("res://godot/character.gd")
+const FIRST_PERSON_ARMS := preload("res://godot/first_person_arms.gd")
+const FIRST_PERSON_ARMS_MODEL := preload("res://assets/characters/first_person_arms.glb")
 const AK47_SCENE := preload("res://assets/guns/ak-47.glb")
+const SNIPER_SCENE := preload("res://assets/guns/sniper.glb")
 const RIFLE_SHOT_SOUND := preload("res://assets/sfx/rifle_single_shot_#4-1789249322799.mp3")
 const SHELL_SOUND_A := preload("res://assets/sfx/gun_shell_fall_on_ti_#1-1789249467987.mp3")
 const SHELL_SOUND_B := preload("res://assets/sfx/rifle_shell_fall_on__#3-1789249431048.mp3")
@@ -26,10 +29,20 @@ const LADDER_APPROACH_CLEARANCE := 0.15
 const LADDER_APPROACH_REACH := 1.05
 const AK47_MAGAZINE_SIZE := 30
 const AK47_FIRE_INTERVAL := .095
+const AK47_SPREAD_DEGREES := 1.6
 const AK47_RELOAD_TIME := 2.35
 const SNIPER_MAGAZINE_SIZE := 5
 const SNIPER_RELOAD_TIME := 2.3
 const KNIFE_SWING_INTERVAL := 1.1
+# Grenades: the pin is pulled on the throw, so the fuse burns while the grenade is
+# still in the air and a good throw goes off about where it lands.
+const GRENADE_CARRIED := 2
+const GRENADE_THROW_INTERVAL := .8
+const GRENADE_FUSE := 2.2
+const GRENADE_THROW_SPEED := 12.0
+const GRENADE_THROW_LIFT := 2.6
+const GRENADE_BLAST_RADIUS := 5.0
+const GRENADE_BLAST_DAMAGE := 95
 const AK47_MODEL_SCALE := .58
 # Maps rifle axes onto hand-bone axes: the bore runs along the soldier's forward
 # and the rifle's up points along the bone's up.
@@ -42,26 +55,107 @@ const AK47_MUZZLE := Vector3(-.001, .148, -.362)
 const AK47_MAGAZINE_LUG := Vector3(0, .113, -.084)
 const AK47_MAGAZINE_CENTER := Vector3(0, .063, -.015)
 const AK47_GRIP := Vector3(0, .073, .126)
-const AK47_HANDGUARD := Vector3(0, .112, -.150)
-# The third-person support hand grips the rear of the handguard, which is what a
-# human arm can actually reach when the rifle is held at the chest.
-const AK47_HANDGUARD_HOLD := Vector3(0, .112, -.105)
-const AK47_GRIP_RAKE := -39.0
+# The support hand grips the rear of the handguard in both views: that is as far
+# forward as an arm reaches without going ramrod straight, whether the rifle is
+# carried at the chest or held out in front of the camera.
+const AK47_HANDGUARD_HOLD := Vector3(0, .112, -.11)
+# The first-person arms are the soldier's, so they are scaled to the view rifle —
+# which is drawn smaller than a real one — and the rig hangs off the camera at
+# ARMS_ANCHOR, which puts the shoulders below the frame edge and far enough forward
+# for the support hand to reach the handguard.
+const ARMS_SCALE := 1.02
+const ARMS_ANCHOR := Vector3(0, -1.619, -.14)
+# The soldier stands bladed behind the rifle, left shoulder forward, the way anyone
+# holding a rifle does: that is what lets the support arm reach the handguard while
+# the trigger arm still folds up behind the grip.
+const ARMS_BLADE := -35.0
+# Where the free hand waits while the other one carries a grenade: down and out to
+# the side, just below the frame.
+const FREE_HAND_REST := Vector3(-.34, -.46, -.24)
 # The rifle arrives as a single mesh, so the detachable magazine is cut out of it
 # in mesh space: below the magazine well floor and in front of the trigger guard.
 const MAGAZINE_CUT_Y := .072
 const MAGAZINE_CUT_Z := -.198
-const GLOVE_COLOR := Color("333940")
-const GLOVE_PAD_COLOR := Color("3e454c")
-const SLEEVE_COLOR := Color("2c3327")
 # Reload beats as a fraction of AK47_RELOAD_TIME: magazine falls, support hand
 # fetches a fresh one, magazine locks in, rifle returns to the shoulder.
 const RELOAD_EJECT_AT := .17
 const RELOAD_FETCH_AT := .52
 const RELOAD_SEAT_AT := .82
-enum Weapon { AK47, SNIPER, KNIFE }
+enum Weapon { AK47, SNIPER, KNIFE, FRAG, SMOKE }
 static var ak47_body_mesh: ArrayMesh
 static var ak47_magazine_mesh: ArrayMesh
+
+class ScopeOverlay extends Control:
+	var active := false
+
+	func _ready() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		if !active: return
+		var center := size * .5
+		var radius := minf(size.x, size.y) * .36
+		draw_vignette(center, radius)
+		draw_arc(center, radius, 0.0, TAU, 96, Color("e7f4f7"), 7.0, true)
+		draw_arc(center, radius - 5.0, 0.0, TAU, 96, Color("ffffff"), 1.0, true)
+		var reticle := Color(0.9, 1.0, 0.94, .95)
+		draw_line(center + Vector2(-radius * .72, 0), center + Vector2(radius * .72, 0), reticle, 1.5)
+		draw_line(center + Vector2(0, -radius * .72), center + Vector2(0, radius * .72), reticle, 1.5)
+		draw_circle(center, 3.0, Color("d6ffe0"))
+		for step in range(1, 6):
+			var offset := radius * step / 6.0
+			draw_line(center + Vector2(-7, -offset), center + Vector2(7, -offset), reticle, 1.0)
+			draw_line(center + Vector2(-7, offset), center + Vector2(7, offset), reticle, 1.0)
+
+	func draw_vignette(center: Vector2, radius: float) -> void:
+		# Everything around the eyepiece goes dark while the scope window itself stays
+		# untouched: the ring is laid down as a fan of quads rather than a full-screen
+		# rectangle, so nothing is ever drawn over the picture the shooter is aiming at.
+		var shade := Color(0.0, 0.0, 0.0, .72)
+		var outside := size.length()
+		# The fan starts a couple of pixels out, so its faceted inner edge hides under
+		# the eyepiece ring instead of serrating the rim of the picture.
+		radius += 2.0
+		var steps := 128
+		for step in steps:
+			var from := TAU * step / steps
+			var to := TAU * (step + 1) / steps
+			var edge_from := Vector2(cos(from), sin(from))
+			var edge_to := Vector2(cos(to), sin(to))
+			draw_colored_polygon(PackedVector2Array([
+				center + edge_from * radius, center + edge_from * outside,
+				center + edge_to * outside, center + edge_to * radius]), shade)
+
+# A thrown grenade. Every peer runs this simulation from the same launch numbers, so
+# the flight and the bounces match everywhere without any per-frame network traffic.
+class GrenadeProjectile extends Node3D:
+	var velocity := Vector3.ZERO
+	var grenade_type := 3
+	var owner_player: Node
+	var fuse := 2.2
+
+	func _process(delta: float) -> void:
+		fuse -= delta
+		var from := global_position
+		velocity.y -= 18.0 * delta
+		var to := from + velocity * delta
+		var query := PhysicsRayQueryParameters3D.new()
+		query.from = from
+		query.to = to
+		query.collision_mask = 1
+		if is_instance_valid(owner_player): query.exclude = [owner_player.get_rid()]
+		var hit := get_world_3d().direct_space_state.intersect_ray(query)
+		if hit.is_empty():
+			global_position = to
+		else:
+			global_position = hit.position + hit.normal * .025
+			velocity = velocity.bounce(hit.normal) * .42
+			if velocity.length() < 1.0: velocity = Vector3.ZERO
+		rotation += Vector3(4.0, 7.0, 5.0) * delta
+		if fuse <= 0.0:
+			if is_instance_valid(owner_player) and owner_player.has_method("detonate_grenade"):
+				owner_player.detonate_grenade(global_position, grenade_type)
+			queue_free()
 var pitch := 0.0
 var yaw := 0.0
 var fire_cooldown := 0.0
@@ -72,11 +166,15 @@ var view_weapon: Node3D
 var ak47: Node3D
 var sniper: Node3D
 var knife: Node3D
+var frag_grenade: Node3D
+var smoke_grenade: Node3D
 var recoil_amount := 0.0
 var ak47_ammo := AK47_MAGAZINE_SIZE
 var reserve_ammo := 90
 var sniper_ammo := SNIPER_MAGAZINE_SIZE
 var sniper_reserve_ammo := 20
+var frag_ammo := GRENADE_CARRIED
+var smoke_ammo := GRENADE_CARRIED
 var is_reloading := false
 var reload_timer := 0.0
 var ammo_label: Label
@@ -92,6 +190,9 @@ var jump_player: AudioStreamPlayer3D
 var muzzle: Marker3D
 var magazine_pivot: Node3D
 var character: Node3D
+var first_person_arms
+var scope_overlay: ScopeOverlay
+var aiming := false
 var fp_muzzle: Marker3D
 var fp_magazine_pivot: Node3D
 var world_muzzle: Marker3D
@@ -101,11 +202,11 @@ var reload_show_timer := 0.0
 var melee_timer := 0.0
 var previous_position := Vector3.ZERO
 var active_ladder := Vector3.ZERO
-var support_hand: Node3D
-var trigger_finger: Node3D
-var trigger_pull := 0.0
 var camera_kick := Vector2.ZERO
 var step_distance := 0.0
+# Where the left hand holds the rifle, in AK47 weapon space. It rides the handguard
+# and travels down to the magazine pouch during a reload.
+var support_hold := AK47_HANDGUARD_HOLD
 
 # Shells and spent magazines only need to look right, so they bounce on a single
 # ground plane instead of adding rigid bodies to the gameplay simulation.
@@ -146,7 +247,9 @@ func _ready() -> void:
 	create_audio_players()
 	if is_multiplayer_authority():
 		create_view_weapons()
+		create_first_person_arms()
 		create_ammo_hud()
+		create_scope_overlay()
 		$CameraBoom/Camera.current = true
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	refresh_weapon_view()
@@ -259,17 +362,15 @@ func create_view_weapons() -> void:
 	fp_muzzle.name = "Muzzle"
 	fp_muzzle.position = AK47_MUZZLE
 	ak47.add_child(fp_muzzle)
-	create_trigger_hand(ak47)
-	support_hand = create_support_hand(ak47)
 
 	sniper = create_weapon_root("Sniper")
-	var dark := Color("161b20")
-	var metal := Color("4d5a66")
-	add_weapon_part(sniper, Vector3(.22, .16, .74), Vector3.ZERO, dark) # body
-	add_weapon_part(sniper, Vector3(.12, .12, .45), Vector3(0, -.02, .52), dark) # stock
-	add_cylinder_part(sniper, .045, 1.20, Vector3(0, .01, -.82), metal) # long barrel
-	add_cylinder_part(sniper, .075, .42, Vector3(0, .17, -.08), Color("111418")) # scope
-	add_weapon_part(sniper, Vector3(.10, .28, .10), Vector3(0, -.20, .10), Color("29323a")) # grip
+	var sniper_model := SNIPER_SCENE.instantiate() as Node3D
+	sniper_model.name = "SniperModel"
+	sniper_model.scale = Vector3.ONE * .86
+	# The imported mesh faces away from the first-person weapon convention, so turn
+	# it around: the stock stays by the shooter and the folded bipod remains intact.
+	sniper_model.rotation_degrees = Vector3(0, 180, 0)
+	sniper.add_child(sniper_model)
 
 	knife = create_weapon_root("Knife")
 	var knife_model := KNIFE_SCENE.instantiate() as Node3D
@@ -277,135 +378,71 @@ func create_view_weapons() -> void:
 	knife_model.scale = Vector3.ONE * .85
 	knife_model.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
 	knife.add_child(knife_model)
+	frag_grenade = create_weapon_root("FragGrenade")
+	frag_grenade.add_child(create_grenade_model(Weapon.FRAG))
+	smoke_grenade = create_weapon_root("SmokeGrenade")
+	smoke_grenade.add_child(create_grenade_model(Weapon.SMOKE))
 	select_weapon(Weapon.AK47)
 
-func glove_material(color: Color) -> StandardMaterial3D:
-	# Cloth and rubber: no specular highlight, so hands stay readable against the rifle.
-	var glove := StandardMaterial3D.new()
-	glove.albedo_color = color
-	glove.metallic = 0.0
-	glove.roughness = 1.0
-	glove.metallic_specular = 0.0
-	return glove
+func create_grenade_model(grenade_type: Weapon) -> Node3D:
+	# Sized like the real thing — a hand-sized can about 11 cm tall — so it reads the
+	# same in the hand and in flight.
+	var model := Node3D.new()
+	model.name = "FragModel" if grenade_type == Weapon.FRAG else "SmokeModel"
+	var body := MeshInstance3D.new()
+	var cylinder := CylinderMesh.new()
+	cylinder.top_radius = .028
+	cylinder.bottom_radius = .032
+	cylinder.height = .088
+	cylinder.radial_segments = 12
+	body.mesh = cylinder
+	body.material_override = material(Color("3d4a2b") if grenade_type == Weapon.FRAG else Color("26313a"))
+	model.add_child(body)
+	var cap := MeshInstance3D.new()
+	var dome := SphereMesh.new()
+	dome.radius = .032
+	dome.height = .044
+	dome.radial_segments = 12
+	dome.rings = 6
+	cap.mesh = dome
+	cap.position.y = .044
+	cap.material_override = material(Color("53613a") if grenade_type == Weapon.FRAG else Color("3b4852"))
+	model.add_child(cap)
+	var ring := MeshInstance3D.new()
+	var pin := TorusMesh.new()
+	pin.inner_radius = .011
+	pin.outer_radius = .016
+	pin.rings = 8
+	pin.ring_segments = 6
+	ring.mesh = pin
+	ring.position = Vector3(.026, .052, 0)
+	ring.rotation_degrees = Vector3(0, 0, 90)
+	ring.material_override = material(Color("b7a05d"))
+	model.add_child(ring)
+	return model
 
-func add_glove_mass(parent: Node3D, size: Vector3, offset: Vector3, tilt_degrees: Vector3, color: Color) -> MeshInstance3D:
-	# Hands are built from squashed spheres: a rounded mass reads as a fist at this
-	# scale, where a box only ever reads as a flat card.
-	var part := MeshInstance3D.new()
-	var ball := SphereMesh.new()
-	ball.radius = .5
-	ball.height = 1.0
-	ball.radial_segments = 20
-	ball.rings = 10
-	part.mesh = ball
-	part.scale = size
-	part.position = offset
-	part.rotation_degrees = tilt_degrees
-	part.material_override = glove_material(color)
-	parent.add_child(part)
-	return part
+func create_first_person_arms() -> void:
+	# The rig hangs off the camera, so the shoulders keep a fixed place under the eyes
+	# and only the arms move; ARMS_ANCHOR puts them roughly where a shouldered rifle
+	# stance holds them.
+	var arms := FIRST_PERSON_ARMS.new()
+	arms.name = "FirstPersonArms"
+	arms.model_scene = FIRST_PERSON_ARMS_MODEL
+	arms.position = ARMS_ANCHOR
+	arms.scale = Vector3.ONE * ARMS_SCALE
+	arms.rotation_degrees = Vector3(0, ARMS_BLADE, 0)
+	$CameraBoom/Camera.add_child(arms)
+	first_person_arms = arms
 
-func add_finger(parent: Node3D, name_hint: String, length: float, radius: float, offset: Vector3, tilt_degrees: Vector3, curl_degrees := Vector3.ZERO) -> Node3D:
-	# A finger hangs from its knuckle along local -Y and bends once at the middle
-	# joint, so a whole hand is built from pivots instead of a rigged mesh.
-	var knuckle := Node3D.new()
-	knuckle.name = name_hint
-	knuckle.position = offset
-	knuckle.rotation_degrees = tilt_degrees
-	parent.add_child(knuckle)
-	add_bone(knuckle, length * .6, radius, Vector3(0, -length * .3, 0), GLOVE_COLOR)
-	var joint := Node3D.new()
-	joint.name = "Joint"
-	joint.position = Vector3(0, -length * .6, 0)
-	joint.rotation_degrees = curl_degrees
-	knuckle.add_child(joint)
-	add_bone(joint, length * .4, radius * .92, Vector3(0, -length * .2, 0), GLOVE_COLOR)
-	return knuckle
-
-func add_bone(parent: Node3D, length: float, radius: float, offset: Vector3, color: Color) -> void:
-	var bone := MeshInstance3D.new()
-	var capsule := CapsuleMesh.new()
-	capsule.radius = radius
-	capsule.height = maxf(length, radius * 2.0)
-	capsule.radial_segments = 12
-	capsule.rings = 4
-	bone.mesh = capsule
-	bone.position = offset
-	bone.material_override = glove_material(color)
-	parent.add_child(bone)
-
-func add_forearm(parent: Node3D, offset: Vector3, elbow: Vector3) -> void:
-	# The elbow is given in weapon space so both arms can aim at the shoulders
-	# regardless of how the hand itself is tilted around the grip.
-	var sleeve := Node3D.new()
-	sleeve.name = "Forearm"
-	sleeve.position = offset
-	parent.add_child(sleeve)
-	var local_elbow: Vector3 = parent.transform.basis.inverse() * elbow
-	var bone := MeshInstance3D.new()
-	var capsule := CapsuleMesh.new()
-	capsule.radius = .032
-	capsule.height = maxf(local_elbow.length(), .056)
-	capsule.radial_segments = 10
-	capsule.rings = 2
-	bone.mesh = capsule
-	bone.material_override = glove_material(SLEEVE_COLOR)
-	# The capsule stands along +Y, so aim it at the elbow and push it half a length back.
-	bone.basis = Basis.looking_at(local_elbow) * Basis.from_euler(Vector3(-PI * .5, 0, 0))
-	bone.position = local_elbow * .5
-	sleeve.add_child(bone)
-	var cuff := MeshInstance3D.new()
-	var band := CylinderMesh.new()
-	band.top_radius = .027
-	band.bottom_radius = .026
-	band.height = .022
-	band.radial_segments = 10
-	band.rings = 1
-	cuff.mesh = band
-	cuff.material_override = glove_material(GLOVE_PAD_COLOR)
-	cuff.basis = bone.basis
-	cuff.position = local_elbow.normalized() * .022
-	sleeve.add_child(cuff)
-
-func create_trigger_hand(parent: Node3D) -> Node3D:
-	# The firing hand swallows the thin pistol grip: the camera sees the glove mass,
-	# the finger rolls crossing the front of the grip and the thumb on the left.
-	var hand := Node3D.new()
-	hand.name = "TriggerHand"
-	hand.position = AK47_GRIP
-	hand.rotation_degrees = Vector3(AK47_GRIP_RAKE, 0, 0)
-	parent.add_child(hand)
-	add_glove_mass(hand, Vector3(.040, .076, .046), Vector3(.005, -.004, .008), Vector3(0, 0, -3.0), GLOVE_COLOR)
-	add_glove_mass(hand, Vector3(.038, .032, .030), Vector3(.002, .028, -.014), Vector3(-8.0, 0, 0), GLOVE_PAD_COLOR)
-	var finger_rows := [.006, -.014]
-	for row in finger_rows.size():
-		add_finger(hand, "Finger%d" % row, .052 - row * .003, .011, Vector3(.024, finger_rows[row], -.020), Vector3(0, 8.0, -90.0), Vector3(0, 38.0, 0))
-	# The index finger keeps its own parent pivot so a shot can squeeze the trigger.
-	trigger_finger = Node3D.new()
-	trigger_finger.name = "TriggerFinger"
-	trigger_finger.position = Vector3(.024, .040, -.018)
-	hand.add_child(trigger_finger)
-	add_finger(trigger_finger, "IndexFinger", .044, .0095, Vector3.ZERO, Vector3(0, 16.0, -90.0), Vector3(0, 40.0, 0))
-	add_finger(hand, "Thumb", .042, .0105, Vector3(-.022, .024, .002), Vector3(104.0, 0, -12.0), Vector3(-26.0, 0, 0))
-	add_forearm(hand, Vector3(.010, -.026, .012), Vector3(.14, -.30, .26))
-	return hand
-
-func create_support_hand(parent: Node3D) -> Node3D:
-	# The support hand cups the handguard from below, wraps its fingers over the far
-	# side and lets go of the rifle during a reload.
-	var hand := Node3D.new()
-	hand.name = "SupportHand"
-	hand.position = AK47_HANDGUARD
-	hand.rotation_degrees = Vector3(-5.0, 0, 9.0)
-	parent.add_child(hand)
-	add_glove_mass(hand, Vector3(.048, .038, .086), Vector3(0, -.013, .004), Vector3.ZERO, GLOVE_COLOR)
-	add_glove_mass(hand, Vector3(.022, .034, .076), Vector3(.024, .002, .002), Vector3(0, 0, -6.0), GLOVE_PAD_COLOR)
-	var finger_slots := [.022, .000, -.022]
-	for slot in finger_slots.size():
-		add_finger(hand, "Finger%d" % slot, .058 - slot * .004, .0095, Vector3(.028, -.006, finger_slots[slot]), Vector3(0, 0, 186.0), Vector3(0, 0, 62.0))
-	add_finger(hand, "Thumb", .046, .0105, Vector3(-.022, .000, -.020), Vector3(98.0, 0, -16.0), Vector3(-22.0, 0, 0))
-	add_forearm(hand, Vector3(-.016, -.024, .026), Vector3(-.24, -.32, .26))
-	return hand
+func create_scope_overlay() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "ScopeLayer"
+	layer.layer = 20
+	add_child(layer)
+	scope_overlay = ScopeOverlay.new()
+	scope_overlay.name = "ScopeOverlay"
+	scope_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(scope_overlay)
 
 func create_audio_players() -> void:
 	shot_player = AudioStreamPlayer3D.new()
@@ -456,21 +493,25 @@ func set_weapon_visible(weapon: Node3D, should_show: bool) -> void:
 
 func weapon_rest_position() -> Vector3:
 	match active_weapon:
-		Weapon.AK47: return Vector3(.28, -.34, -.48)
-		Weapon.SNIPER: return Vector3(.34, -.26, -.92)
+		Weapon.AK47: return Vector3(.103, -.273, -.465)
+		Weapon.SNIPER: return Vector3(.20, -.32, -.62)
 		Weapon.KNIFE: return Vector3(.52, -.22, -.75)
+		Weapon.FRAG: return Vector3(.26, -.22, -.40)
+		Weapon.SMOKE: return Vector3(.26, -.22, -.40)
 	return Vector3.ZERO
 
 func weapon_rest_rotation() -> Vector3:
 	match active_weapon:
-		Weapon.AK47: return Vector3(deg_to_rad(-4.0), deg_to_rad(-3.0), 0.0)
+		Weapon.AK47: return Vector3(deg_to_rad(-2.0), deg_to_rad(8.0), 0.0)
 		Weapon.SNIPER: return Vector3(deg_to_rad(-3.0), deg_to_rad(-2.0), 0.0)
 		Weapon.KNIFE: return Vector3(deg_to_rad(-6.0), deg_to_rad(0.0), deg_to_rad(-12.0))
+		Weapon.FRAG: return Vector3(deg_to_rad(-10.0), deg_to_rad(12.0), deg_to_rad(-8.0))
+		Weapon.SMOKE: return Vector3(deg_to_rad(-10.0), deg_to_rad(12.0), deg_to_rad(-8.0))
 	return Vector3.ZERO
 
 func select_weapon(new_weapon: Weapon) -> void:
 	active_weapon = new_weapon
-	view_weapon = [ak47, sniper, knife][active_weapon]
+	view_weapon = [ak47, sniper, knife, frag_grenade, smoke_grenade][active_weapon]
 	refresh_weapon_view()
 	view_weapon.position = weapon_rest_position()
 	view_weapon.rotation = weapon_rest_rotation()
@@ -486,7 +527,7 @@ func reset_ak47_pose() -> void:
 		magazine_pivot.position = AK47_MAGAZINE_LUG
 		magazine_pivot.rotation = Vector3.ZERO
 		magazine_pivot.visible = true
-	if support_hand: support_hand.position = AK47_HANDGUARD
+	support_hold = AK47_HANDGUARD_HOLD
 
 func create_ammo_hud() -> void:
 	var hud := CanvasLayer.new()
@@ -530,7 +571,11 @@ func update_ammo_hud() -> void:
 		ammo_label.hide()
 		return
 	ammo_label.show()
-	if is_reloading:
+	if active_weapon == Weapon.FRAG:
+		ammo_label.text = "ГРАНАТА  %d    ЛКМ — бросок" % frag_ammo
+	elif active_weapon == Weapon.SMOKE:
+		ammo_label.text = "ДЫМОВАЯ  %d    ЛКМ — бросок" % smoke_ammo
+	elif is_reloading:
 		ammo_label.text = ("АК-47" if active_weapon == Weapon.AK47 else "СНАЙПЕРКА") + "  ПЕРЕЗАРЯДКА…"
 	elif active_weapon == Weapon.SNIPER:
 		ammo_label.text = "СНАЙПЕРКА  %02d / %02d    R — перезарядка" % [sniper_ammo, sniper_reserve_ammo]
@@ -538,7 +583,7 @@ func update_ammo_hud() -> void:
 		ammo_label.text = "АК-47  %02d / %02d    R — перезарядка" % [ak47_ammo, reserve_ammo]
 
 func start_reload() -> void:
-	if is_reloading or active_weapon == Weapon.KNIFE:
+	if is_reloading or active_weapon == Weapon.KNIFE or is_grenade(active_weapon):
 		return
 	if active_weapon == Weapon.AK47 and (ak47_ammo == AK47_MAGAZINE_SIZE or reserve_ammo == 0): return
 	if active_weapon == Weapon.SNIPER and (sniper_ammo == SNIPER_MAGAZINE_SIZE or sniper_reserve_ammo == 0): return
@@ -556,6 +601,9 @@ func try_fire() -> void:
 			return
 		ak47_ammo -= 1
 		fire_cooldown = AK47_FIRE_INTERVAL
+	elif is_grenade(active_weapon):
+		throw_grenade()
+		return
 	elif active_weapon == Weapon.SNIPER:
 		if sniper_ammo == 0:
 			start_reload()
@@ -571,8 +619,15 @@ func try_fire() -> void:
 	play_recoil()
 	var camera := $CameraBoom/Camera
 	var direction: Vector3 = -camera.global_transform.basis.z
-	# The shot itself stays on the reticle line; only the visual effects move to the
-	# barrel mouth, so the flash never looks like it leaves the camera centre.
+	if active_weapon == Weapon.AK47:
+		# Apply spread around the reticle before sending the shot so the server and
+		# every peer resolve and display the same bullet trajectory.
+		var spread := deg_to_rad(AK47_SPREAD_DEGREES)
+		direction = (direction
+			+ camera.global_transform.basis.x * randf_range(-spread, spread)
+			+ camera.global_transform.basis.y * randf_range(-spread, spread)).normalized()
+	# The muzzle effect stays on the barrel mouth while the projectile direction may
+	# deviate slightly from the reticle when using the automatic rifle.
 	var origin: Vector3 = camera.global_position + direction * .25
 	var flash_origin: Vector3 = origin + camera.global_transform.basis.x * .26 - camera.global_transform.basis.y * .12
 	if active_weapon == Weapon.AK47 and muzzle: flash_origin = muzzle.global_position
@@ -581,11 +636,60 @@ func try_fire() -> void:
 	else: fire(origin, direction, flash_origin, active_weapon, shooter_id)
 	update_ammo_hud()
 
+func is_grenade(weapon: Weapon) -> bool:
+	return weapon == Weapon.FRAG or weapon == Weapon.SMOKE
+
+func grenades_left(weapon: Weapon) -> int:
+	return frag_ammo if weapon == Weapon.FRAG else smoke_ammo
+
+func throw_grenade() -> void:
+	if grenades_left(active_weapon) == 0: return
+	if active_weapon == Weapon.FRAG: frag_ammo -= 1
+	else: smoke_ammo -= 1
+	# The hand is empty from this moment on, whatever the belt still carries.
+	refresh_weapon_view()
+	fire_cooldown = GRENADE_THROW_INTERVAL
+	# The view model swings through the throw on the same counter the recoil uses.
+	recoil_amount = 1.0
+	var camera := $CameraBoom/Camera
+	# It leaves the hand just in front of the face and carries the player's own run
+	# with it, so a grenade thrown on the move does not drop straight down.
+	var origin: Vector3 = camera.global_position - camera.global_transform.basis.z * .45
+	var launch: Vector3 = (-camera.global_transform.basis.z * GRENADE_THROW_SPEED
+		+ Vector3.UP * GRENADE_THROW_LIFT + Vector3(velocity.x, 0, velocity.z))
+	if multiplayer.has_multiplayer_peer(): launch_grenade.rpc(origin, launch, active_weapon)
+	else: launch_grenade(origin, launch, active_weapon)
+	update_ammo_hud()
+
+@rpc("any_peer", "call_local", "reliable")
+func launch_grenade(origin: Vector3, launch: Vector3, grenade_type: Weapon) -> void:
+	# The throw travels over the network once; from there every peer simulates the
+	# same flight, so the grenade lies in the same place on every screen.
+	var grenade := GrenadeProjectile.new()
+	grenade.name = "Grenade"
+	grenade.velocity = launch
+	grenade.grenade_type = grenade_type
+	grenade.fuse = GRENADE_FUSE
+	grenade.owner_player = self
+	grenade.add_child(create_grenade_model(grenade_type))
+	var level := get_tree().current_scene
+	level.add_child(grenade)
+	grenade.global_position = origin
+
+func detonate_grenade(at: Vector3, grenade_type: int) -> void:
+	# Called by each peer's own copy of the grenade, so the blast is seen everywhere;
+	# only the server turns it into damage.
+	var level := get_tree().current_scene
+	if level.has_method("show_explosion"): level.show_explosion(at, grenade_type == Weapon.SMOKE)
+	if grenade_type == Weapon.SMOKE: return
+	if multiplayer.has_multiplayer_peer() and !multiplayer.is_server(): return
+	if level.has_method("resolve_explosion"):
+		level.resolve_explosion(at, GRENADE_BLAST_RADIUS, GRENADE_BLAST_DAMAGE)
+
 func play_recoil() -> void:
 	# The knife attacks with a swing; firearms recoil only backwards in camera space.
 	recoil_amount = 1.0
 	if active_weapon == Weapon.KNIFE: return
-	trigger_pull = 1.0
 	# Firearms also punch the view: the muzzle climbs and drifts a little sideways.
 	var climb := .75 if active_weapon == Weapon.AK47 else 1.9
 	camera_kick.x = minf(camera_kick.x + climb, 2.8)
@@ -633,9 +737,17 @@ func refresh_weapon_view() -> void:
 	# in the soldier's hands otherwise.
 	var world_view := third_person or !is_multiplayer_authority()
 	if character: character.visible = world_view
+	# The arms are posed onto the AK and onto a carried grenade; the sniper and the
+	# knife are still held by an empty screen, so those keep showing no hands.
+	if first_person_arms:
+		first_person_arms.visible = !world_view and (active_weapon == Weapon.AK47
+			or (is_grenade(active_weapon) and grenades_left(active_weapon) > 0))
 	if ak47: set_weapon_visible(ak47, !world_view and active_weapon == Weapon.AK47)
 	if sniper: set_weapon_visible(sniper, !world_view and active_weapon == Weapon.SNIPER)
 	if knife: set_weapon_visible(knife, !world_view and active_weapon == Weapon.KNIFE)
+	# An empty hand holds nothing: the grenade only shows while one is left on the belt.
+	if frag_grenade: set_weapon_visible(frag_grenade, !world_view and active_weapon == Weapon.FRAG and frag_ammo > 0)
+	if smoke_grenade: set_weapon_visible(smoke_grenade, !world_view and active_weapon == Weapon.SMOKE and smoke_ammo > 0)
 	muzzle = world_muzzle if world_view else fp_muzzle
 	magazine_pivot = world_magazine_pivot if world_view else fp_magazine_pivot
 
@@ -648,6 +760,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.keycode == KEY_1: select_weapon(Weapon.AK47)
 		if event.keycode == KEY_2: select_weapon(Weapon.SNIPER)
 		if event.keycode == KEY_3: select_weapon(Weapon.KNIFE)
+		if event.keycode == KEY_4: select_weapon(Weapon.FRAG)
+		if event.keycode == KEY_5: select_weapon(Weapon.SMOKE)
 		if event.keycode == KEY_R: start_reload()
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		yaw -= event.relative.x * .0025; pitch = clamp(pitch - event.relative.y * .0025, -1.2, 1.2)
@@ -748,13 +862,13 @@ func pose_ak47_reload(progress: float) -> void:
 	var fetch_offset := Vector3(-.05, -.30, .11)
 	var magazine_grip := AK47_MAGAZINE_LUG + Vector3(-.035, -.105, .015)
 	if progress < RELOAD_EJECT_AT:
-		support_hand.position = AK47_HANDGUARD.lerp(AK47_HANDGUARD + fetch_offset, smoothstep(.05, RELOAD_EJECT_AT, progress))
+		support_hold = AK47_HANDGUARD_HOLD.lerp(AK47_HANDGUARD_HOLD + fetch_offset, smoothstep(.05, RELOAD_EJECT_AT, progress))
 	elif progress < RELOAD_FETCH_AT:
-		support_hand.position = AK47_HANDGUARD + fetch_offset
+		support_hold = AK47_HANDGUARD_HOLD + fetch_offset
 	elif progress < RELOAD_SEAT_AT:
-		support_hand.position = (magazine_grip + fetch_offset).lerp(magazine_grip, lift)
+		support_hold = (magazine_grip + fetch_offset).lerp(magazine_grip, lift)
 	else:
-		support_hand.position = magazine_grip.lerp(AK47_HANDGUARD, smoothstep(RELOAD_SEAT_AT, 1.0, progress))
+		support_hold = magazine_grip.lerp(AK47_HANDGUARD_HOLD, smoothstep(RELOAD_SEAT_AT, 1.0, progress))
 	magazine_pivot.visible = progress < RELOAD_EJECT_AT or progress >= RELOAD_FETCH_AT
 	if progress < RELOAD_EJECT_AT:
 		# The spent magazine stays locked in until the release is pressed.
@@ -797,15 +911,34 @@ func update_character(delta: float) -> void:
 		character.melee_swing = 0.0
 	character.fire_kick = move_toward(character.fire_kick, 0.0, delta * 5.0)
 	character.animate(delta)
+	if first_person_arms and first_person_arms.visible:
+		animate_first_person_arms(delta)
+
+func animate_first_person_arms(delta: float) -> void:
+	# Whatever is in the hands leads and the arms follow it: the rig is handed the
+	# world positions its two hands have to end up at.
+	first_person_arms.ground_speed = character.ground_speed
+	first_person_arms.sprinting = character.sprinting
+	first_person_arms.fire_kick = character.fire_kick
+	first_person_arms.carrying = is_grenade(active_weapon)
+	if first_person_arms.carrying:
+		# One hand holds the grenade, the other hangs at the side out of frame.
+		first_person_arms.grip_point = view_weapon.global_position
+		first_person_arms.weapon_basis = view_weapon.global_transform.basis
+		first_person_arms.support_point = $CameraBoom/Camera.to_global(FREE_HAND_REST)
+	else:
+		first_person_arms.grip_point = ak47.to_global(AK47_GRIP)
+		first_person_arms.support_point = ak47.to_global(support_hold)
+		first_person_arms.weapon_basis = ak47.global_transform.basis
+	first_person_arms.animate(delta)
 
 func _process(delta: float) -> void:
 	update_character(delta)
+	if is_multiplayer_authority(): update_scope(delta)
 	if !is_multiplayer_authority() or !view_weapon: return
 	if fire_cooldown > 0.0:
 		fire_cooldown = maxf(0.0, fire_cooldown - delta)
 	update_camera_kick(delta)
-	trigger_pull = move_toward(trigger_pull, 0.0, delta * 6.0)
-	if trigger_finger: trigger_finger.rotation.y = deg_to_rad(12.0) * trigger_pull
 	if is_reloading:
 		var previous_timer := reload_timer
 		reload_timer -= delta
@@ -829,9 +962,25 @@ func _process(delta: float) -> void:
 		view_weapon.position = rest_position + Vector3(0, -.12, -.36) * recoil_amount
 		view_weapon.rotation = rest_rotation + Vector3(deg_to_rad(-96.0), deg_to_rad(8.0), deg_to_rad(18.0)) * recoil_amount
 		return
+	if is_grenade(active_weapon):
+		# The arm winds up over the shoulder and comes back empty; once the last one is
+		# gone the rifle comes back up on its own.
+		view_weapon.position = rest_position + Vector3(-.10, .16, .26) * recoil_amount
+		view_weapon.rotation = rest_rotation + Vector3(deg_to_rad(-70.0), 0.0, deg_to_rad(18.0)) * recoil_amount
+		if fire_cooldown == 0.0 and grenades_left(active_weapon) == 0: select_weapon(Weapon.AK47)
+		return
 	var kick := .28 if active_weapon == Weapon.AK47 else .48
 	view_weapon.position = rest_position + Vector3(0, 0, kick) * recoil_amount
 	view_weapon.rotation = rest_rotation + Vector3(deg_to_rad(8.0), 0, 0) * recoil_amount
+
+func update_scope(delta: float) -> void:
+	var should_aim := active_weapon == Weapon.SNIPER and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and !third_person and !is_reloading
+	aiming = should_aim
+	var target_fov := 37.5 if aiming else 75.0
+	$CameraBoom/Camera.fov = lerpf($CameraBoom/Camera.fov, target_fov, clampf(delta * 12.0, 0.0, 1.0))
+	if scope_overlay:
+		scope_overlay.active = aiming
+		scope_overlay.queue_redraw()
 
 @rpc("any_peer", "call_local", "unreliable")
 func play_jump() -> void:
@@ -849,8 +998,9 @@ func sync_state(new_position: Vector3, new_yaw: float, new_pitch: float, crouche
 func fire(origin: Vector3, direction: Vector3, flash_origin: Vector3, weapon: Weapon, shooter_id: int) -> void:
 	# The server resolves the raycast and damage; every peer renders the same shot FX.
 	if character: character.fire_kick = 1.0
-	if weapon == Weapon.AK47:
-		play_rifle_shot_effect(Transform3D(Basis.looking_at(direction), flash_origin))
+	if weapon == Weapon.AK47 or weapon == Weapon.SNIPER:
+		var shot_power := 1.5 if weapon == Weapon.SNIPER else 1.0
+		play_rifle_shot_effect(Transform3D(Basis.looking_at(direction), flash_origin), shot_power)
 	var main := get_tree().current_scene
 	if main.has_method("resolve_projectile_hit") and (!multiplayer.has_multiplayer_peer() or multiplayer.is_server()):
 		main.resolve_projectile_hit(origin, direction, shooter_id, weapon)
@@ -926,11 +1076,13 @@ func play_knife_hit() -> void:
 	if knife_hit_player: knife_hit_player.play()
 	melee_timer = KNIFE_SWING_INTERVAL * .55
 
-func play_rifle_shot_effect(flash_transform: Transform3D) -> void:
-	if shot_player: shot_player.play()
-	spawn_muzzle_flash(flash_transform)
+func play_rifle_shot_effect(flash_transform: Transform3D, power := 1.0) -> void:
+	if shot_player:
+		shot_player.volume_db = -2.0 + (20.0 * log(power) / log(10.0))
+		shot_player.play()
+	spawn_muzzle_flash(flash_transform, power)
 	spawn_muzzle_smoke(flash_transform)
-	spawn_muzzle_sparks(flash_transform)
+	spawn_muzzle_sparks(flash_transform, power)
 	spawn_shell_casing()
 
 func attach_muzzle_effect(effect: Node3D, fallback: Transform3D, offset: Vector3) -> void:
@@ -944,7 +1096,7 @@ func attach_muzzle_effect(effect: Node3D, fallback: Transform3D, offset: Vector3
 	get_tree().current_scene.add_child(effect)
 	effect.global_transform = Transform3D(fallback.basis, fallback.origin + fallback.basis * offset)
 
-func spawn_muzzle_flash(flash_transform: Transform3D) -> void:
+func spawn_muzzle_flash(flash_transform: Transform3D, power := 1.0) -> void:
 	# Head-on pop: a two-particle star burst, each with its own roll and size.
 	var star := CPUParticles3D.new()
 	star.name = "MuzzleFlash"
@@ -958,8 +1110,8 @@ func spawn_muzzle_flash(flash_transform: Transform3D) -> void:
 	star.initial_velocity_max = 0.0
 	star.angle_min = -180.0
 	star.angle_max = 180.0
-	star.scale_amount_min = .26
-	star.scale_amount_max = .46
+	star.scale_amount_min = .26 * power
+	star.scale_amount_max = .46 * power
 	star.scale_amount_curve = FX.fade_curve(1.0, .25)
 	star.color_ramp = FX.alpha_ramp(Color(1, 1, 1, 1), Color(1, 1, 1, 0))
 	star.mesh = FX.star_mesh(1.0)
@@ -970,7 +1122,7 @@ func spawn_muzzle_flash(flash_transform: Transform3D) -> void:
 	# so the muzzle throws real fire instead of a round glowing blob.
 	var flame := CPUParticles3D.new()
 	flame.name = "MuzzleFlame"
-	flame.amount = 4
+	flame.amount = maxi(4, roundi(4.0 * power))
 	flame.lifetime = .09
 	flame.one_shot = true
 	flame.explosiveness = 1.0
@@ -983,11 +1135,11 @@ func spawn_muzzle_flash(flash_transform: Transform3D) -> void:
 	flame.damping_max = 18.0
 	flame.gravity = Vector3.ZERO
 	flame.particle_flag_align_y = true
-	flame.scale_amount_min = .7
-	flame.scale_amount_max = 1.35
+	flame.scale_amount_min = .7 * power
+	flame.scale_amount_max = 1.35 * power
 	flame.scale_amount_curve = FX.fade_curve(1.0, .3)
 	flame.color_ramp = FX.alpha_ramp(Color(1, 1, 1, 1), Color(1, .78, .5, 0))
-	flame.mesh = FX.flame_mesh(.09, .20)
+	flame.mesh = FX.flame_mesh(.09 * power, .20 * power)
 	attach_muzzle_effect(flame, flash_transform, Vector3(0, 0, -.04))
 	flame.emitting = true
 	flame.finished.connect(flame.queue_free)
@@ -1070,10 +1222,10 @@ func spawn_muzzle_smoke(flash_transform: Transform3D) -> void:
 	cloud.emitting = true
 	cloud.finished.connect(cloud.queue_free)
 
-func spawn_muzzle_sparks(flash_transform: Transform3D) -> void:
+func spawn_muzzle_sparks(flash_transform: Transform3D, power := 1.0) -> void:
 	var sparks := CPUParticles3D.new()
 	sparks.name = "MuzzleSparks"
-	sparks.amount = 7
+	sparks.amount = maxi(7, roundi(7.0 * power))
 	sparks.lifetime = .26
 	sparks.one_shot = true
 	sparks.explosiveness = 1.0
@@ -1085,8 +1237,8 @@ func spawn_muzzle_sparks(flash_transform: Transform3D) -> void:
 	sparks.damping_max = 5.0
 	sparks.gravity = Vector3(0, -9.0, 0)
 	sparks.particle_flag_align_y = true
-	sparks.scale_amount_min = .5
-	sparks.scale_amount_max = 1.1
+	sparks.scale_amount_min = .5 * power
+	sparks.scale_amount_max = 1.1 * power
 	sparks.scale_amount_curve = FX.fade_curve(1.0, .2)
 	sparks.color_ramp = FX.alpha_ramp(Color("fff0c2"), Color(1, .42, .06, 0))
 	sparks.mesh = FX.streak_mesh(.009, .12)

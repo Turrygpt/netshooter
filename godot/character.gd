@@ -43,9 +43,10 @@ var melee_swing := 0.0
 # in from the rifle it mounts on the hand.
 var support_offset := Vector3(0, .03, -.19)
 var rifle_pose := Transform3D.IDENTITY
+var model_scene: PackedScene = MODEL
 
 func _ready() -> void:
-	var model := MODEL.instantiate() as Node3D
+	var model := model_scene.instantiate() as Node3D
 	model.name = "SoldierModel"
 	# The mesh faces +Z, the player's forward is -Z.
 	model.rotation.y = PI
