@@ -19,8 +19,7 @@ const KNIFE_HIT_SOUND := preload("res://assets/sfx/knife_hit_stone.mp3")
 const FOOTSTEP_SOUND := preload("res://assets/sfx/Heavy_boot_step_on_c_#4-1789290593954.mp3")
 const JUMP_SOUND := preload("res://assets/sfx/A_person_in_sneakers_#2-1789290491180.mp3")
 const KNIFE_SCENE := preload("res://assets/guns/knife.glb")
-const LADDER_POSITION := Vector3(-1.15, 0, 8)
-const LADDER_CLIMB_POSITION_X := -0.75
+const LADDER_POSITIONS := [Vector3(7.15, 0, 8), Vector3(-8.85, -3.4, 8)]
 const LADDER_CLIMB_SPEED := 2.7
 const LADDER_TOP := 3.42
 const LADDER_APPROACH_CLEARANCE := 0.15
@@ -101,6 +100,7 @@ var is_crouching := false
 var reload_show_timer := 0.0
 var melee_timer := 0.0
 var previous_position := Vector3.ZERO
+var active_ladder := Vector3.ZERO
 var support_hand: Node3D
 var trigger_finger: Node3D
 var trigger_pull := 0.0
@@ -662,7 +662,8 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if !is_multiplayer_authority(): return
 	var climb_axis := Input.get_axis("move_back", "move_forward")
-	if is_near_ladder() and abs(climb_axis) > 0.01: climbing = true
+	# Climbing is deliberate: E prevents the player from being pulled onto a ladder while walking past it.
+	if is_near_ladder() and Input.is_key_pressed(KEY_E) and abs(climb_axis) > 0.01: climbing = true
 	if climbing:
 		climb_ladder(climb_axis, delta)
 		if multiplayer.has_multiplayer_peer(): sync_state.rpc(global_position, rotation.y, $CameraBoom.rotation.x, is_crouching)
@@ -684,29 +685,35 @@ func _physics_process(delta: float) -> void:
 	if multiplayer.has_multiplayer_peer(): sync_state.rpc(global_position, rotation.y, $CameraBoom.rotation.x, is_crouching)
 
 func is_near_ladder() -> bool:
-	if abs(global_position.z - LADDER_POSITION.z) >= .8 or global_position.y < -.1 or global_position.y > LADDER_TOP + .2:
-		return false
-	# Mount from the east side, facing the open part of the hatch. At roof level
-	# the east landing remains available so the player can start descending.
-	if global_position.y > 3.0:
-		return abs(global_position.x - 1.7) < .9
-	var approach_offset := global_position.x - LADDER_POSITION.x
-	return approach_offset > LADDER_APPROACH_CLEARANCE and approach_offset < LADDER_APPROACH_REACH
+	for ladder in LADDER_POSITIONS:
+		if global_position.y < ladder.y - .1 or global_position.y > ladder.y + LADDER_TOP + .2: continue
+		if abs(global_position.z - ladder.z) >= .8: continue
+		# Mount from the east side; each staircase has its own upper landing.
+		if global_position.y > ladder.y + 3.0:
+			if abs(global_position.x - (ladder.x + 1.7)) < .9:
+				active_ladder = ladder
+				return true
+		else:
+			var approach_offset: float = global_position.x - ladder.x
+			if approach_offset > LADDER_APPROACH_CLEARANCE and approach_offset < LADDER_APPROACH_REACH:
+				active_ladder = ladder
+				return true
+	return false
 
 func climb_ladder(axis: float, delta: float) -> void:
 	# Snap gently onto the rails, then W climbs upward and S descends.
 	# Keep the capsule inside the hatch opening instead of directly under its rim.
-	global_position.x = move_toward(global_position.x, LADDER_CLIMB_POSITION_X, delta * 4.0)
-	global_position.z = move_toward(global_position.z, LADDER_POSITION.z, delta * 4.0)
+	global_position.x = move_toward(global_position.x, active_ladder.x + .4, delta * 4.0)
+	global_position.z = move_toward(global_position.z, active_ladder.z, delta * 4.0)
 	velocity = Vector3(0, axis * LADDER_CLIMB_SPEED, 0)
 	move_and_slide()
-	if global_position.y >= LADDER_TOP:
+	if axis > 0.0 and global_position.y >= active_ladder.y + LADDER_TOP:
 		# Step out onto the solid east roof panel, away from the hatch rim.
-		global_position = Vector3(1.7, 3.58, LADDER_POSITION.z)
+		global_position = Vector3(active_ladder.x + 1.7, active_ladder.y + 3.58, active_ladder.z)
 		velocity = Vector3.ZERO
 		climbing = false
-	elif global_position.y <= .05 and axis < 0.0:
-		global_position.y = .05
+	elif global_position.y <= active_ladder.y + .05 and axis < 0.0:
+		global_position.y = active_ladder.y + .05
 		climbing = false
 
 func update_stance(crouching: bool, delta: float) -> void:

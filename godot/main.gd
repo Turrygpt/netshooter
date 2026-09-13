@@ -25,6 +25,22 @@ var joining := false
 var glass_panel_serial := 0
 var bullet_holes: Array[MeshInstance3D] = []
 
+class LightFlicker extends Node:
+	var lamp: OmniLight3D
+	var base_energy := 1.0
+	var next_flicker := 0.0
+	var blackout_time := 0.0
+	func _process(delta: float) -> void:
+		if blackout_time > 0.0:
+			blackout_time -= delta
+			lamp.light_energy = base_energy * .12
+			return
+		next_flicker -= delta
+		lamp.light_energy = base_energy
+		if next_flicker <= 0.0:
+			blackout_time = randf_range(.08, .22)
+			next_flicker = randf_range(8.0, 18.0)
+
 # Lightweight visual physics keeps glass destruction lively without adding dozens
 # of collision bodies to the gameplay simulation.
 class GlassShard extends MeshInstance3D:
@@ -203,16 +219,30 @@ func make_atmosphere() -> void:
 	environment.background_color = Color("050914")
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environment.ambient_light_color = Color("162233")
-	environment.ambient_light_energy = .08
+	environment.ambient_light_energy = .18
 	environment.glow_enabled = true
 	var world := WorldEnvironment.new(); world.environment = environment; add_child(world)
 
-func add_ceiling_lamp(position: Vector3) -> void:
+func add_ceiling_lamp(position: Vector3, flicker := false) -> void:
 	var fixture := MeshInstance3D.new()
 	var mesh := BoxMesh.new(); mesh.size = Vector3(1.5, .10, .35)
-	var material := StandardMaterial3D.new(); material.albedo_color = Color("b9ddff"); material.emission_enabled = true; material.emission = Color("6ea9e8"); material.emission_energy_multiplier = 2.5
+	var material := StandardMaterial3D.new(); material.albedo_color = Color("d7ecff"); material.emission_enabled = true; material.emission = Color("8bc8ff"); material.emission_energy_multiplier = 3.2
 	fixture.mesh = mesh; fixture.material_override = material; fixture.position = position; add_child(fixture)
-	var light := OmniLight3D.new(); light.position = position - Vector3(0,.15,0); light.light_color = Color("8bbdff"); light.light_energy = 2.2; light.omni_range = 5.5; light.omni_attenuation = 1.5; add_child(light)
+	var light := OmniLight3D.new(); light.position = position - Vector3(0,.15,0); light.light_color = Color("9ccfff"); light.light_energy = 3.1; light.omni_range = 6.8; light.omni_attenuation = 1.35; add_child(light)
+	if flicker:
+		var controller := LightFlicker.new()
+		controller.lamp = light
+		controller.base_energy = light.light_energy
+		controller.next_flicker = randf_range(6.0, 14.0)
+		add_child(controller)
+
+func add_emergency_lamp(position: Vector3) -> void:
+	var fixture := MeshInstance3D.new()
+	var mesh := SphereMesh.new(); mesh.radius = .12; mesh.height = .24
+	var material := StandardMaterial3D.new(); material.albedo_color = Color("ff3b30"); material.emission_enabled = true; material.emission = Color("ff1208"); material.emission_energy_multiplier = 4.0
+	fixture.mesh = mesh; fixture.material_override = material; fixture.position = position; add_child(fixture)
+	var light := OmniLight3D.new(); light.position = position; light.light_color = Color("ff3c2b"); light.light_energy = 1.8; light.omni_range = 4.2; light.omni_attenuation = 1.6; add_child(light)
+	var controller := LightFlicker.new(); controller.lamp = light; controller.base_energy = light.light_energy; controller.next_flicker = randf_range(6.0, 14.0); add_child(controller)
 
 func make_box(position: Vector3, size: Vector3, rotate_x := 0.0, color := Color("303946"), collidable := true, texture: Texture2D = WALL_TEXTURE, surface_type: String = "solid") -> void:
 	var wall := StaticBody3D.new()
@@ -237,49 +267,92 @@ func make_box(position: Vector3, size: Vector3, rotate_x := 0.0, color := Color(
 	add_child(wall)
 
 func make_level_collision() -> void:
-	for floor in 1:
-		var y := floor * floor_height
-		make_box(Vector3(0, y - .15, 0), Vector3(24, .3, 24), 0.0, Color.WHITE, true, FLOOR_TEXTURE)
-		for x in [-8.0, 0.0, 8.0]:
-			for z in [-8.0, 0.0, 8.0]:
-				if x == 0.0 and z == 8.0:
-					# North room's ceiling hatch: four slabs deliberately leave a 2.4m square opening.
-					make_box(Vector3(-2.6, y + 3.4, z), Vector3(2.8, .18, 8.0), 0.0, Color.WHITE, true, CEILING_TEXTURE)
-					make_box(Vector3(2.6, y + 3.4, z), Vector3(2.8, .18, 8.0), 0.0, Color.WHITE, true, CEILING_TEXTURE)
-					make_box(Vector3(0, y + 3.4, z - 2.6), Vector3(2.4, .18, 2.8), 0.0, Color.WHITE, true, CEILING_TEXTURE)
-					make_box(Vector3(0, y + 3.4, z + 2.6), Vector3(2.4, .18, 2.8), 0.0, Color.WHITE, true, CEILING_TEXTURE)
+	var room_centers := [-16.0, -8.0, 0.0, 8.0, 16.0]
+	var divider_positions := [-12.0, -4.0, 4.0, 12.0]
+	for floor in [-1, 0, 1]:
+		var y: float = floor * floor_height
+		if floor == -1:
+			make_box(Vector3(0, y - .15, 0), Vector3(40, .3, 40), 0.0, Color.WHITE, true, FLOOR_TEXTURE)
+		elif floor == 0:
+			for tile_x in room_centers:
+				for tile_z in room_centers:
+					if tile_x == -8.0 and tile_z == 8.0:
+						make_box(Vector3(tile_x - 2.6, y - .15, tile_z), Vector3(2.8, .3, 8.0), 0.0, Color.WHITE, true, FLOOR_TEXTURE)
+						make_box(Vector3(tile_x + 2.6, y - .15, tile_z), Vector3(2.8, .3, 8.0), 0.0, Color.WHITE, true, FLOOR_TEXTURE)
+						make_box(Vector3(tile_x, y - .15, tile_z - 2.6), Vector3(2.4, .3, 2.8), 0.0, Color.WHITE, true, FLOOR_TEXTURE)
+						make_box(Vector3(tile_x, y - .15, tile_z + 2.6), Vector3(2.4, .3, 2.8), 0.0, Color.WHITE, true, FLOOR_TEXTURE)
+						continue
+					make_box(Vector3(tile_x, y - .15, tile_z), Vector3(8.0, .3, 8.0), 0.0, Color.WHITE, true, FLOOR_TEXTURE)
+		else:
+			for tile_x in room_centers:
+				for tile_z in room_centers:
+					if tile_x == 8.0 and tile_z == 8.0:
+						make_box(Vector3(tile_x - 2.6, y - .15, tile_z), Vector3(2.8, .3, 8.0), 0.0, Color.WHITE, true, FLOOR_TEXTURE)
+						make_box(Vector3(tile_x + 2.6, y - .15, tile_z), Vector3(2.8, .3, 8.0), 0.0, Color.WHITE, true, FLOOR_TEXTURE)
+						make_box(Vector3(tile_x, y - .15, tile_z - 2.6), Vector3(2.4, .3, 2.8), 0.0, Color.WHITE, true, FLOOR_TEXTURE)
+						make_box(Vector3(tile_x, y - .15, tile_z + 2.6), Vector3(2.4, .3, 2.8), 0.0, Color.WHITE, true, FLOOR_TEXTURE)
+						continue
+					make_box(Vector3(tile_x, y - .15, tile_z), Vector3(8.0, .3, 8.0), 0.0, Color.WHITE, true, FLOOR_TEXTURE)
+		for x in room_centers:
+			for z in room_centers:
+				var is_hatch: bool = (floor == -1 and x == -8.0 and z == 8.0) or (floor == 0 and x == 8.0 and z == 8.0)
+				if is_hatch:
+					make_box(Vector3(x - 2.6, y + 3.4, z), Vector3(2.8, .18, 8.0), 0.0, Color.WHITE, true, CEILING_TEXTURE)
+					make_box(Vector3(x + 2.6, y + 3.4, z), Vector3(2.8, .18, 8.0), 0.0, Color.WHITE, true, CEILING_TEXTURE)
+					make_box(Vector3(x, y + 3.4, z - 2.6), Vector3(2.4, .18, 2.8), 0.0, Color.WHITE, true, CEILING_TEXTURE)
+					make_box(Vector3(x, y + 3.4, z + 2.6), Vector3(2.4, .18, 2.8), 0.0, Color.WHITE, true, CEILING_TEXTURE)
 				else:
 					make_box(Vector3(x, y + 3.4, z), Vector3(8.0, .18, 8.0), 0.0, Color.WHITE, true, CEILING_TEXTURE)
-		# Office facade: framed exterior windows, retained as colliders so they are not traversable.
-		for x in [-12.0, 12.0]:
-			for z in [-8.0, 0.0, 8.0]:
-				make_box(Vector3(x, y + .7, z), Vector3(.35, 1.4, 8.0))
-				make_box(Vector3(x, y + 2.9, z), Vector3(.35, 1.0, 8.0))
-				for side in [-1.0, 1.0]: make_box(Vector3(x, y + 1.7, z + side * 3.05), Vector3(.35, 3.4, 1.9))
-				make_box(Vector3(x, y + 2.0, z), Vector3(.09, 1.4, 4.2), 0.0, Color.WHITE, true, GLASS_TEXTURE, "glass")
-		for z in [-12.0, 12.0]:
-			for x in [-8.0, 0.0, 8.0]:
-				make_box(Vector3(x, y + .7, z), Vector3(8.0, 1.4, .35))
-				make_box(Vector3(x, y + 2.9, z), Vector3(8.0, 1.0, .35))
-				for side in [-1.0, 1.0]: make_box(Vector3(x + side * 3.05, y + 1.7, z), Vector3(1.9, 3.4, .35))
-				make_box(Vector3(x, y + 2.0, z), Vector3(4.2, 1.4, .09), 0.0, Color.WHITE, true, GLASS_TEXTURE, "glass")
-		# Divider panels are placed on the actual bay edges (±4), leaving a 2.5m aperture in every bay.
-		for z in [-4.0, 4.0]:
-			for x in [-8.0, 0.0, 8.0]:
-				make_box(Vector3(x - 2.625, y + 1.7, z), Vector3(2.75, 3.4, .28))
-				make_box(Vector3(x + 2.625, y + 1.7, z), Vector3(2.75, 3.4, .28))
-		for x in [-4.0, 4.0]:
-			for z in [-8.0, 0.0, 8.0]:
-				make_box(Vector3(x, y + 1.7, z - 2.625), Vector3(.28, 3.4, 2.75))
-				make_box(Vector3(x, y + 1.7, z + 2.625), Vector3(.28, 3.4, 2.75))
-		# Ladder is rotated 90 degrees and hugs the left (west) edge of the hatch.
-		# Its rails are separated along Z; visual-only so the climber is not blocked by rungs.
-		for z_rail in [7.35, 8.65]: make_box(Vector3(-1.15, y + 1.7, z_rail), Vector3(.11, 3.15, .11), 0.0, Color.WHITE, false, LADDER_TEXTURE)
-		for rung in 7: make_box(Vector3(-1.15, y + .35 + rung * .42, 8), Vector3(.11, .09, 1.4), 0.0, Color.WHITE, false, LADDER_TEXTURE)
-	# Only corners and the central room are lit: the four side rooms stay notably darker.
-	for x in [-8.0, 0.0, 8.0]:
-		for z in [-8.0, 0.0, 8.0]:
-			if (abs(x) == 8.0 and abs(z) == 8.0) or (x == 0.0 and z == 0.0): add_ceiling_lamp(Vector3(x, 3.18, z))
+		# Reinforced perimeter of the base.
+		make_box(Vector3(-20, y + 1.7, 0), Vector3(.45, 3.4, 40))
+		make_box(Vector3(20, y + 1.7, 0), Vector3(.45, 3.4, 40))
+		make_box(Vector3(0, y + 1.7, -20), Vector3(40, 3.4, .45))
+		make_box(Vector3(0, y + 1.7, 20), Vector3(40, 3.4, .45))
+		# Every inner wall has a door-width aperture, creating a connected 5 × 5 compound.
+		for divider in divider_positions:
+			for center in room_centers:
+				make_box(Vector3(divider, y + 1.7, center - 2.65), Vector3(.28, 3.4, 2.7))
+				make_box(Vector3(divider, y + 1.7, center + 2.65), Vector3(.28, 3.4, 2.7))
+				make_box(Vector3(center - 2.65, y + 1.7, divider), Vector3(2.7, 3.4, .28))
+				make_box(Vector3(center + 2.65, y + 1.7, divider), Vector3(2.7, 3.4, .28))
+		if floor == 0 or floor == -1:
+			# Ladders sit against the hatch side instead of floating in its center.
+			var ladder_x := 7.15 if floor == 0 else -8.85
+			for z_rail in [7.35, 8.65]: make_box(Vector3(ladder_x, y + 1.7, z_rail), Vector3(.11, 3.15, .11), 0.0, Color.WHITE, false, LADDER_TEXTURE)
+			for rung in 7: make_box(Vector3(ladder_x, y + .35 + rung * .42, 8), Vector3(.11, .09, 1.4), 0.0, Color.WHITE, false, LADDER_TEXTURE)
+		# Every room gets a ceiling fixture; stairwell hatches stay clear for traversal.
+		for x in room_centers:
+			for z in room_centers:
+				var is_stairwell: bool = (floor == -1 and x == -8.0 and z == 8.0) or (floor == 0 and x == 8.0 and z == 8.0)
+				if is_stairwell: continue
+				var flicker: bool = (floor == -1 and (x == -8.0 or z == 16.0)) or (floor == 0 and x == 16.0 and z == -8.0)
+				add_ceiling_lamp(Vector3(x, y + 3.18, z), flicker)
+		if floor == -1 or floor == 0:
+			# Same ceiling fixtures light the stairwells from the side without blocking the shafts.
+			add_ceiling_lamp(Vector3(-5.8, y + 3.18, 5.6), true)
+			add_ceiling_lamp(Vector3(5.8, y + 3.18, 5.6), true)
+		if floor == 0:
+			# Supply crates sit against perimeter walls, keeping the corridors clear.
+			add_base_cover(Vector3(-19.2, .375, -14), 2)
+			add_base_cover(Vector3(19.2, .375, 6), 1)
+			add_base_cover(Vector3(0, .375, -19.2), 2)
+
+func add_base_cover(position: Vector3, crates: int) -> void:
+	for index in crates:
+		# Stack crates directly above one another so every box has physical support.
+		make_box(position + Vector3(0, index * .75, 0), Vector3(.85, .75, .85), 0.0, Color("4f563c"), true, null)
+
+func add_maze_bulkheads(y: float, floor: int) -> void:
+	# X barriers close doorways on vertical walls; Z barriers close the perpendicular ones.
+	var x_barriers := [Vector2(-4, -8), Vector2(4, 0), Vector2(12, 8), Vector2(-12, 16), Vector2(4, -16)]
+	var z_barriers := [Vector2(-4, -8), Vector2(4, 8), Vector2(12, 0), Vector2(-12, 8), Vector2(4, 16)]
+	if floor == 1:
+		x_barriers = [Vector2(-12, -8), Vector2(-4, 8), Vector2(4, -16), Vector2(12, 0)]
+		z_barriers = [Vector2(-12, 0), Vector2(-4, 16), Vector2(4, -8), Vector2(12, 8)]
+	for barrier in x_barriers:
+		make_box(Vector3(barrier.x, y + 1.7, barrier.y), Vector3(.34, 3.4, 2.7))
+	for barrier in z_barriers:
+		make_box(Vector3(barrier.y, y + 1.7, barrier.x), Vector3(2.7, 3.4, .34))
 
 func resolve_projectile_hit(origin: Vector3, direction: Vector3, shooter_id: int, weapon: int) -> void:
 	var shooter := spawned.get(shooter_id) as Node3D
